@@ -104,14 +104,18 @@ def test_spans_form_node_llm_hierarchy(completed_task):
     ]} <= node_names
     assert all(s["status"] == "ok" for s in spans)
     llm_spans = [s for s in spans if s["kind"] == "llm"]
-    assert len(llm_spans) == 2
+    analysis = [s for s in llm_spans if s["name"].startswith("llm:")]
+    rechecks = [s for s in llm_spans if s["name"].startswith("recheck:")]
+    assert len(analysis) == 2  # 两个工作单元
+    assert len(rechecks) == 3  # 3 条高置信候选复核（agent.yaml: review.recheck=true）
     span_ids = {s["span_id"] for s in spans}
     for s in llm_spans:
         assert s["parent_span_id"] in span_ids
-    # llm span 的父节点是 node:llm_analyze
     parent_names = {s["span_id"]: s["name"] for s in spans}
-    for s in llm_spans:
+    for s in analysis:
         assert parent_names[s["parent_span_id"]] == "node:llm_analyze"
+    for s in rechecks:
+        assert parent_names[s["parent_span_id"]] == "node:validate_findings"
 
 
 def test_export_trace_json_is_redacted_and_parseable(completed_task):

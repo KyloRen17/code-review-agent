@@ -52,6 +52,9 @@ def build_trace_chain(session: Session, finding_id: str, task_id: str | None = N
             "evidence": finding.evidence,
             "suggestion": finding.suggestion,
             "origin_call_id": finding.origin,
+            "downgrade_reason": finding.downgrade_reason,
+            "tool_evidence": json.loads(finding.tool_evidence) if finding.tool_evidence else [],
+            "recheck": json.loads(finding.recheck) if finding.recheck else None,
         },
         "llm_call": (
             {

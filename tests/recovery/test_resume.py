@@ -67,6 +67,7 @@ def test_crash_mid_analysis_resumes_without_redoing_done_units(tmp_path, buggy_d
     settings = load_settings(_config_path())
     settings.storage.db = str(settings_db)
     settings.storage.report_dir = str(report_dir)
+    settings.review.recheck = False
 
     engine = create_db_engine(settings_db)
     init_db(engine)

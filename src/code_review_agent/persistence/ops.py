@@ -57,6 +57,9 @@ def save_finding(session: Session, finding: Finding) -> None:
     record.evidence = finding.evidence
     record.suggestion = finding.suggestion
     record.origin = finding.origin
+    record.downgrade_reason = finding.downgrade_reason
+    record.tool_evidence = json.dumps(finding.tool_evidence, ensure_ascii=False) if finding.tool_evidence else None
+    record.recheck = json.dumps(finding.recheck, ensure_ascii=False) if finding.recheck else None
     session.commit()
 
 
@@ -80,6 +83,9 @@ def load_findings(session: Session, task_id: str) -> list[Finding]:
             severity=Severity(r.severity),
             confidence=Confidence(r.confidence),
             origin=r.origin or "",
+            downgrade_reason=r.downgrade_reason,
+            tool_evidence=json.loads(r.tool_evidence) if r.tool_evidence else [],
+            recheck=json.loads(r.recheck) if r.recheck else None,
         )
         for r in records
     ]

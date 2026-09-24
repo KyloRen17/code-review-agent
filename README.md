@@ -12,7 +12,7 @@
 | 评论级 Trace 与可观测 | **已实现**（Phase 6） | `observability/`、`persistence/`、`cra trace` |
 | 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
 | Token/金额预算 | **已实现**（Phase 7） | `budget/`、`configs/model_pricing.yaml`、`--budget` |
-| 置信度分级 | 最小版（Phase 1）→ Phase 8（完整） | `review/validator.py` |
+| 置信度分级 | **已实现**（Phase 8） | `review/validator.py`、`review/recheck.py` |
 | Secret 防护与安全执行 | 最小版（Phase 1）→ Phase 9（完整） | `security/` |
 
 当前进度见 `docs/progress.md`。
@@ -91,6 +91,15 @@ cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，
 - 调高预算后 `cra resume <task_id>` 续审被跳过的单元；
 - 未在 `configs/model_pricing.yaml` 登记单价的模型会被**拒绝调用**（fail-closed）。
 - 报告中的金额为本地单价表估算口径，非服务商精确账单。
+
+## 置信度分级
+
+每条 finding 分为"高置信度（可直接采纳）"与"仅供参考"，分级由确定性代码决定（非 LLM 自评）：
+
+- 高置信必须同时满足：行号指向本次**新增**代码、证据文本确实出现在 diff 中；
+- 工具独立佐证（如 `py-ast-check` 检出的语法错误行）可支撑升级；
+- 高置信候选在预算内做**上限复核**（`confirmed` 保持 / `uncertain` 降级 / `rejected` 移除）；
+- 降级与复核理由写入报告、DB 与 trace（`cra trace <finding_id>`）。
 
 ## 接入真实 LLM（可选，已支持）
 

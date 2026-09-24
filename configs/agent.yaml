@@ -23,3 +23,7 @@ storage:
 limits:
   max_diff_bytes: 5242880     # 5 MiB，超过则拒绝处理（Phase 2 提供更精细的分块策略）
   max_work_unit_bytes: 65536  # 单个工作单元（hunk）超过此大小则跳过并记录
+
+review:
+  recheck: true               # 高置信候选的预算内复核（上限内二次验证）
+  recheck_max: 5              # 最多复核的 finding 数量

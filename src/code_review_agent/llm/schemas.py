@@ -25,11 +25,27 @@ class LLMFindingOutput(BaseModel):
     findings: list[LLMFinding] = []
 
 
+class RecheckVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["confirmed", "rejected", "uncertain"]
+    reason: str = ""
+
+
 def parse_llm_findings(text: str) -> LLMFindingOutput:
+    cleaned = _strip_fence(text)
+    return LLMFindingOutput.model_validate_json(cleaned)
+
+
+def parse_recheck_verdict(text: str) -> RecheckVerdict:
+    return RecheckVerdict.model_validate_json(_strip_fence(text))
+
+
+def _strip_fence(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:]
         cleaned = cleaned.strip()
-    return LLMFindingOutput.model_validate_json(cleaned)
+    return cleaned

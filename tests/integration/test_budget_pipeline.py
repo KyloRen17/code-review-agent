@@ -28,6 +28,7 @@ def test_budget_exhaustion_yields_partial_report_with_unreviewed_scope(
     settings = load_settings(tools_config_path.parent / "agent.yaml")
     settings.storage.report_dir = str(tmp_path / "runs")
     settings.model.max_output_tokens = 100
+    settings.review.recheck = False
     # 单价 100 元/1k 输入，每单元实际 ~22.4 元：预算 30 元 → 第一个单元可调用并结算，
     # 第二个单元预留时（22.4+22.4 > 30）被拒，标记 skipped。
     budget = _expensive_budget(session_factory, limit=30.0)
@@ -78,6 +79,7 @@ def test_budget_gate_blocks_call_before_sending(tmp_path, buggy_diff_path, sessi
 
     settings = load_settings(tools_config_path.parent / "agent.yaml")
     settings.storage.report_dir = str(tmp_path / "runs")
+    settings.review.recheck = False
     gateway = _CountingGateway()
     budget = _expensive_budget(session_factory, limit=0.0)
     pipeline = ReviewPipeline(

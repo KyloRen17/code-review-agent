@@ -97,6 +97,8 @@ class MockLLMGateway:
         self.model_name = model_name
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        if request.context.get("purpose") == "recheck":
+            return self._recheck(request)
         file = str(request.context.get("file", ""))
         new_start = int(request.context.get("new_start") or 1)
         code = str(request.context.get("code", ""))
@@ -104,6 +106,23 @@ class MockLLMGateway:
         content = json.dumps(
             {"findings": [f.model_dump() for f in findings]}, ensure_ascii=False, indent=2
         )
+        input_tokens = max(1, (len(request.system) + len(request.prompt)) // 4)
+        output_tokens = max(1, len(content) // 4)
+        return LLMResponse(
+            call_id=request.call_id,
+            model=self.model_name,
+            content=content,
+            usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        )
+
+    def _recheck(self, request: LLMRequest) -> LLMResponse:
+        evidence = str(request.context.get("evidence", ""))
+        hit = any(rule.pattern.search(evidence) for rule in _RULES)
+        if hit:
+            payload = {"verdict": "confirmed", "reason": "规则复核命中：证据中存在可独立检出的风险模式"}
+        else:
+            payload = {"verdict": "uncertain", "reason": "规则复核未找到独立证据，无法确认"}
+        content = json.dumps(payload, ensure_ascii=False)
         input_tokens = max(1, (len(request.system) + len(request.prompt)) // 4)
         output_tokens = max(1, len(content) // 4)
         return LLMResponse(

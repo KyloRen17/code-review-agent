@@ -30,6 +30,13 @@ def _finding_section(f: Finding) -> str:
         lines.append(f"- **触发条件**: {f.trigger}")
     if f.suggestion:
         lines.append(f"- **建议**: {f.suggestion}")
+    if f.tool_evidence:
+        lines.append(f"- **工具佐证**: {', '.join(f.tool_evidence)}")
+    if f.recheck:
+        lines.append(
+            f"- **复核**: {f.recheck.get('verdict')} — {f.recheck.get('reason')}"
+            f"（调用 `{f.recheck.get('call_id')}`）"
+        )
     if f.downgrade_reason:
         lines.append(f"- **分级说明**: {f.downgrade_reason}")
     lines.append(

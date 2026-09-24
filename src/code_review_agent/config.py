@@ -40,12 +40,18 @@ class LimitsConfig(BaseModel):
     max_work_unit_bytes: int = 64 * 1024
 
 
+class ReviewConfig(BaseModel):
+    recheck: bool = False
+    recheck_max: int = 5
+
+
 class AgentSettings(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     publishing: PublishingConfig = Field(default_factory=PublishingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    review: ReviewConfig = Field(default_factory=ReviewConfig)
 
 
 def load_settings(path: Path | str | None = None) -> AgentSettings:

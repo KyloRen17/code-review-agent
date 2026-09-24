@@ -57,6 +57,7 @@ def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tool
         )
 
     settings = _settings(tmp_path, agent_config_path)
+    settings.review.recheck = False
     gateway = OpenAICompatGateway(
         model_name="gpt-test", api_key="sk-test", client=_client(handler), base_url="https://llm.test/v1"
     )
@@ -95,6 +96,7 @@ def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_p
         )
 
     settings = _settings(tmp_path, agent_config_path)
+    settings.review.recheck = False
     gateway = OpenAICompatGateway(
         model_name="gpt-test", api_key="sk-test", client=_client(handler), base_url="https://llm.test/v1"
     )

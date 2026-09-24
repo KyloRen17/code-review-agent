@@ -3,6 +3,45 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 8 — Finding 验证与置信度分级（2026-09-24 完成）
+
+### 完成项
+
+- **确定性验证规则**（`review/validator.py` 重写，全部理由写入 finding 字段，报告与 trace 可查）：
+  - 文件在 diff 内、行号在 hunk 新行范围内（既有）；
+  - **证据核验**：evidence 文本（归一化后）必须确实出现在该文件的 diff 内容中，否则降级；
+  - **变更相关性**：高置信度的行号必须指向**新增行**（`+` 行）——指向 context 行（未变更代码）降级为参考；
+  - **工具交叉佐证**：工具报告的错误位置（如 py-ast-check 语法错误行）与 finding 位置重合 →
+    `tool_evidence` 记录工具名，且可据此升级为高置信（独立静态证据）；
+  - **相似合并**：同文件、行距 ≤3、标题相似度（SequenceMatcher）≥0.8 → 合并去重（精确重复继续丢弃）。
+- **预算内有上限的复核**（`review/recheck.py` `RecheckService`）：
+  - 只复核高置信候选，上限 `review.recheck_max`（默认 5，服务自身强制）；
+  - 复核调用走同一预算闸门（不足则跳过复核、不阻塞主流程）；
+  - verdict：confirmed → 保持高置信并记录复核信息；rejected → 移除（dropped 说明原因）；
+    uncertain → 降级为参考（理由入 downgrade_reason）；
+  - 复核调用同样入 llm_calls（prompt/响应脱敏快照）与 span（`recheck:<finding_id>`，父=validate_findings 节点）；
+  - 复核结果与分级结果在 validate_findings 节点落库（幂等 upsert），直跑 graph 与 CLI 行为一致。
+- LLM 自报 confidence 仅为输入信号；最终分级 = 确定性规则 + 工具佐证 + 复核裁决。
+- Mock 网关支持 `purpose=recheck` 请求：按规则扫描证据给 confirmed/uncertain（确定性、可测）。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **131 passed**（新增：validator 7 规则测试 + recheck 8（confirmed/uncertain 降级/rejected 移除/上限/解析失败/全流水线复核入报告与 DB）） |
+| e2e 断言强化 | 报告 finding 数 == DB 行数 == 7（曾发现 state 过滤 bug：参考级 findings 被误删——由 CLI 演示发现，e2e 补报告计数断言防回归） |
+| trace | finding 链含 recheck（verdict/reason/call_id）、tool_evidence、downgrade_reason |
+| CLI 演示 | `review examples/buggy.diff`：7 条（高置信 3 全部复核 confirmed；参考 4）；报告含复核行 |
+
+### 修复记录
+
+- validate_findings 的复核结果合并曾把非候选 findings 一并过滤掉（报告 3 条 vs 应为 7 条）——
+  DB 行数与报告不一致被 CLI 演示暴露；改为 `rejected_ids` 精确剔除 + 候选映射替换。
+
+### 下一步
+
+- Phase 9：安全边界——脱敏全覆盖（工具输出/trace）、Prompt Injection 对抗测试、工具白名单强化。
+
 ## Phase 7 — Token/金额预算（2026-09-24 完成）
 
 ### 完成项

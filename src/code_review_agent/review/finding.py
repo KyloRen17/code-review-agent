@@ -32,3 +32,5 @@ class Finding(BaseModel):
     confidence: Confidence = Confidence.reference
     origin: str = ""
     downgrade_reason: str | None = None
+    tool_evidence: list[str] = Field(default_factory=list)
+    recheck: dict | None = None

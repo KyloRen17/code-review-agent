@@ -53,6 +53,8 @@ def test_cli_review_on_buggy_diff_end_to_end(tmp_path, buggy_diff_path):
     report_text = report_dir.joinpath(task.id, "report.md").read_text(encoding="utf-8")
     assert "高置信度（可直接采纳）" in report_text
     assert "使用 eval() 执行动态表达式" in report_text
+    assert report_text.count("\n### [") == 7  # 报告中的 finding 数与 DB 一致
+    assert "**复核**" in report_text and "confirmed" in report_text
     expected_titles = {
         "subprocess 使用 shell=True",
         "使用 eval() 执行动态表达式",

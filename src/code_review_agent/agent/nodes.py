@@ -22,6 +22,7 @@ from ..persistence.models import LLMCallRecord
 from ..providers.base import RepositoryProvider
 from ..publishers.base import PublishReceipt, ReviewPublisher
 from ..review.finding import Confidence, Finding, Severity
+from ..review.recheck import RecheckService
 from ..review.report import render_markdown
 from ..review.validator import validate_and_grade
 from ..security.redactor import redact
@@ -315,9 +316,38 @@ class ReviewPipeline:
             )
 
     def validate_findings(self, state: GraphState) -> dict:
+        task_id = state["task_id"]
         validated, dropped = validate_and_grade(
-            state["task_id"], state.get("findings", []), state.get("diff_files", [])
+            task_id,
+            state.get("findings", []),
+            state.get("diff_files", []),
+            tool_results=state.get("tool_results"),
+            work_units=state.get("work_units"),
         )
+        if self.settings.review.recheck:
+            candidates = [f for f in validated if f.confidence == Confidence.high]
+            if candidates:
+                service = RecheckService(
+                    self.gateway,
+                    self.session_factory,
+                    self.recorder,
+                    budget=self.budget,
+                    model_name=self.settings.model.name,
+                    max_output_tokens=min(512, self.settings.model.max_output_tokens),
+                    max_rechecks=self.settings.review.recheck_max,
+                )
+                rechecked, notes = service.verify(task_id, candidates, state.get("diff_files", []))
+                rechecked_map = {f.finding_id: f for f in rechecked}
+                rejected_ids = {f.finding_id for f in candidates} - set(rechecked_map)
+                validated = [
+                    rechecked_map.get(f.finding_id, f)
+                    for f in validated
+                    if f.finding_id not in rejected_ids
+                ]
+                dropped.extend(notes)
+        with self.session_factory() as session:
+            for f in validated:
+                ops.save_finding(session, f)  # 验证/分级/复核结果落库（幂等 upsert）
         return {"validated_findings": validated, "dropped_notes": dropped}
 
     def generate_report(self, state: GraphState) -> dict:

@@ -63,6 +63,9 @@ class FindingRecord(Base):
     evidence: Mapped[str] = mapped_column(Text, default="")
     suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     origin: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    downgrade_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tool_evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON 数组
+    recheck: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON 对象
 
 
 class LLMCallRecord(Base):
