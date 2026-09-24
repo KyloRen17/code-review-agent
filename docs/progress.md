@@ -3,6 +3,75 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 11 — 最终测试、文档与打包（2026-09-24 完成）
+
+### 完成项
+
+- 文档：`docs/architecture.md`（工作流/模块地图/六能力实现位置/设计决策）、
+  `docs/security.md`（威胁模型/脱敏矩阵/fail-closed 点/沙箱/已知限制）、
+  `docs/evaluation.md`（测试分层/六能力核验指引/真实集成条件）。
+- `scripts/demo.sh` 重写为一键六能力演示（无 Key）：审查+脱敏+工具+复核 → trace 导出 →
+  resume 幂等 → 预算部分报告 → 声明式工具结果 → 负样本。
+- 示例工件：`examples/review_report.md`（样例报告）、`examples/trace_example.json`（脱敏 trace 导出）。
+- **收官安全修复（重要）**：发现 LangGraph 每节点后写 checkpoint，`load_input` 后的 checkpoint
+  含**未脱敏 raw_diff**（本地落盘泄露面）。重构：脱敏前置到 load_input（state 永不携带原文，
+  `raw_diff` 从 GraphState 移除），security_scan 改为不动点验证闸门（复扫产生新掩码动作即 fail-closed）。
+  该问题由 demo 脚本的产物级 secret 扫描发现——产物扫描本身进入 demo 常驻步骤。
+- 干净环境验证：全新 venv（`uv venv`）→ `pip install -e ".[dev]"` → CLI 演示 → 全量测试。
+
+### 最终验证记录（实际执行）
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/`（开发 venv） | **151 passed**（unit 85 / integration 4 / e2e 9 / recovery 4 / security 9 / trace 6 / …合计按文件计） |
+| 全新 venv 安装 + 运行（`/tmp/cra-fresh`） | 安装成功；`review examples/buggy.diff` → 7 findings；`pytest tests/` → **151 passed** |
+| `bash scripts/demo.sh` | 六能力全链路通过（见 demo 输出）；产物级 secret 扫描 0 命中 |
+| `bash scripts/run_tests.sh` | 通过 |
+| `cra trace <id> --export` | JSON 可解析、含 15 spans、无 secret 原值 |
+| 收官 secret 扫描（`git ls-files` 全量 grep） | 仓库无真实凭证；`sk-live-...` 仅存在于演示/测试夹具（故意放置的假值）；无 `.env` |
+
+### 六项核心能力实现位置（速查）
+
+| 能力 | 位置 |
+|---|---|
+| 可恢复 | `checkpoint/`、`agent/nodes.py`（增量持久化）、`cli.py resume`、`persistence/ops.py` |
+| 可观测 | `observability/`（spans/trace）、`persistence/`（llm_calls/tool_results/spans）、`cra trace` |
+| 可扩展 | `tools/`（base/registry/dispatcher/implementations）、`configs/tools.yaml` |
+| 预算 | `budget/`（pricing/ledger/controller）、`agent/nodes.py`、`configs/model_pricing.yaml` |
+| 置信度 | `review/validator.py`、`review/recheck.py` |
+| 安全 | `security/`、`tools/sandbox.py`、`publishers/`、`agent/nodes.py`（load_input 前置脱敏） |
+
+### 运行命令速查
+
+```bash
+pip install -e ".[dev]"
+cra review examples/buggy.diff                     # 本地 diff（默认 dry-run）
+cra review <PR/MR URL>                             # 平台输入（需 token 环境变量）
+cra review <PR URL> --publish                      # 显式授权发布行级评论（未实测）
+cra resume <task_id>                               # 恢复/重试失败与预算跳过单元
+cra trace <finding_id> [--export out.json]         # 评论级追溯链
+pytest tests/                                      # 全量测试（无 Key）
+bash scripts/demo.sh                               # 一键六能力演示（无 Key）
+```
+
+Demo 输出位置：`runs/<task_id>/report.md`、`runs/<task_id>/log.jsonl`、`runs/demo/trace_export.json`；
+示例工件随仓库提交：`examples/review_report.md`、`examples/trace_example.json`。
+
+### 已知限制与未验证项（诚实清单）
+
+1. **未实测（缺凭证/环境）**：真实 LLM 调用（OPENAI_API_KEY）、GitHub/GitLab 真实读取与发布
+   （GITHUB_TOKEN/GITLAB_TOKEN + 测试仓库）、Docker 沙箱真实容器执行（本机无 docker）。
+   以上逻辑全部经 Mock 全链路验证；验证命令见 `docs/evaluation.md`。
+2. Secret 检测为正则模式集（非 gitleaks 全量规则、无熵值检测）。
+3. 预算并发原子性为进程内锁；跨进程依赖 SQLite 文件锁，未做分布式账本。
+4. OTel OTLP 导出未接入（自研 SQLite span 存储替代，导出 JSON 结构兼容）。
+5. `create_all` 不做 schema 迁移：表结构变更后需删除 `runs/` 重建（开发期约定）。
+6. GitLab `changes` 接口在极新版本被分页 `diffs` 接口替代，真实集成如失败需切换。
+
+### 完成定义核对
+
+其他开发者按 README 在干净环境安装、运行演示、通过测试核验六项能力 —— 已按上述"全新 venv"步骤实际执行验证。
+
 ## Phase 10 — GitHub/GitLab 发布（2026-09-24 完成）
 
 ### 完成项

@@ -15,7 +15,7 @@ class GraphState(TypedDict, total=False):
     input_ref: str
     source: str
 
-    raw_diff: str
+    # 原始 diff 永不进入 state（checkpoint 会落盘未脱敏内容）；只携带脱敏后的文本
     redacted_diff: str
     input_fingerprint: str
     base_sha: str | None

@@ -26,7 +26,7 @@ from ..review.finding import Confidence, Finding, Severity
 from ..review.recheck import RecheckService
 from ..review.report import render_markdown
 from ..review.validator import validate_and_grade
-from ..security.redactor import assert_safe_text, redact
+from ..security.redactor import SecurityError, assert_safe_text, redact
 from ..tools.base import ToolStatus
 from ..tools.dispatcher import ToolDispatcher
 from .state import GraphState
@@ -73,12 +73,22 @@ class ReviewPipeline:
     # ------------------------------------------------------------------
     def load_input(self, state: GraphState) -> dict:
         review_input = self.provider.fetch(state["input_ref"])
+        # 脱敏必须在进入 state 之前完成：LangGraph 会在每个节点后写 checkpoint，
+        # 若把原始 diff 放进 state，未脱敏 secret 会随 checkpoint 落盘。
+        assert_safe_text(review_input.raw_diff)
+        redacted, report = redact(review_input.raw_diff)
+        if report.matches:
+            logger.warning(
+                "secrets_redacted",
+                extra={"source": review_input.source, "matches": report.matches, "kinds": report.by_kind},
+            )
         logger.info(
             "input_loaded",
             extra={"source": review_input.source, "bytes": len(review_input.raw_diff)},
         )
         return {
-            "raw_diff": review_input.raw_diff,
+            "redacted_diff": redacted,
+            "redaction": report,
             "input_fingerprint": review_input.fingerprint,
             "source": review_input.source,
             "base_sha": review_input.base_sha,
@@ -86,14 +96,12 @@ class ReviewPipeline:
         }
 
     def security_scan(self, state: GraphState) -> dict:
-        assert_safe_text(state["raw_diff"])  # fail-closed：无法安全处理的输入直接终止
-        redacted, report = redact(state["raw_diff"])
-        if report.matches:
-            logger.warning(
-                "secrets_redacted",
-                extra={"matches": report.matches, "kinds": report.by_kind},
-            )
-        return {"redacted_diff": redacted, "redaction": report}
+        """验证闸门：对已脱敏文本复扫，结果必须是不动点（再无新的掩码动作），否则 fail-closed。"""
+        current = state.get("redacted_diff", "")
+        redacted_again, _ = redact(current)
+        if redacted_again != current:
+            raise SecurityError("脱敏后复扫仍产生新的掩码动作，fail-closed 终止")
+        return {}
 
     def normalize_diff(self, state: GraphState) -> dict:
         diff_files = parse_unified_diff(state["redacted_diff"])

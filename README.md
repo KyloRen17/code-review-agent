@@ -8,14 +8,16 @@
 
 | 能力 | 状态 | 位置 |
 |---|---|---|
-| Checkpoint 与异常恢复 | **已实现**（Phase 5） | `checkpoint/`、`persistence/`、`agent/nodes.py` |
-| 评论级 Trace 与可观测 | **已实现**（Phase 6） | `observability/`、`persistence/`、`cra trace` |
-| 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
-| Token/金额预算 | **已实现**（Phase 7） | `budget/`、`configs/model_pricing.yaml`、`--budget` |
-| 置信度分级 | **已实现**（Phase 8） | `review/validator.py`、`review/recheck.py` |
-| Secret 防护与安全执行 | **已实现**（Phase 9） | `security/`、`tools/sandbox.py` |
+| Checkpoint 与异常恢复 | **已实现** | `checkpoint/`、`persistence/`、`agent/nodes.py` |
+| 评论级 Trace 与可观测 | **已实现** | `observability/`、`persistence/`、`cra trace` |
+| 声明式工具注册 | **已实现** | `tools/`、`configs/tools.yaml` |
+| Token/金额预算 | **已实现** | `budget/`、`configs/model_pricing.yaml`、`--budget` |
+| 置信度分级 | **已实现** | `review/validator.py`、`review/recheck.py` |
+| Secret 防护与安全执行 | **已实现** | `security/`、`tools/sandbox.py` |
+| GitHub/GitLab 行级评论发布 | **已实现**（未实测真实平台） | `publishers/`、`--publish` |
 
-当前进度见 `docs/progress.md`。
+架构见 `docs/architecture.md`，安全设计见 `docs/security.md`，评估方法见 `docs/evaluation.md`，
+各阶段实现与验证记录见 `docs/progress.md`。一键演示（无需 API Key）：`bash scripts/demo.sh`。
 
 ## 安装
 
