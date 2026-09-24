@@ -3,6 +3,38 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 10 — GitHub/GitLab 发布（2026-09-24 完成）
+
+### 完成项
+
+- `publishers/github.py` `GitHubReviewPublisher`：PR 行级评论（`path/line/side=RIGHT/commit_id`），
+  汇总 Markdown 始终保留本地。
+- `publishers/gitlab.py` `GitLabMRPublisher`：MR discussions + position（`new_path/new_line/base/start/head_sha`）。
+- **发布前校验**：拉取平台元数据比对 head SHA（任务基于的 diff 与当前不一致 → 拒绝发布，
+  防评论错位）；只发布能精确定位到**新增行**的 findings，无法定位的仅保留在报告（receipt 说明数量）。
+- **幂等去重（两层）**：①评论 body 内嵌稳定锚点 `<!-- CRA-FINDING:{id} -->`，发布前先拉取远端
+  既有评论，已存在锚点跳过——覆盖"远端已成功、本地记账中断"的恢复场景；②本地 `publications`
+  表 sent 记录直接复用 receipt（Phase 5 机制，failed 记录允许重试）。
+- **显式授权**：`--publish`（review 与 resume 均可）；默认 dry-run；本地 diff 无发布目标 → 明确报错。
+  平台令牌只从 `GITHUB_TOKEN` / `GITLAB_TOKEN` 环境变量读取。
+- 发布评论 body 渲染前再过 redact（外发面纵深防御，有测试）。
+- 发布失败（429/401/网络）→ receipt.failed + 落库 failed + 日志告警，可 resume 重试。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **151 passed**（新增 publishers 9 + CLI 发布门控 2） |
+| Mock API 发布测试 | 行级参数（path/line/side/commit_id 与 position 字段）断言；锚点断言；重复发布 0 新增；SHA 不一致拒绝（0 条发出）；无法定位仅留报告；429→failed receipt；评论 body 无 secret |
+| CLI e2e | 默认 dry-run；`--publish` 走发布器并写 sent 记录；resume 复用 sent 记录不再调用发布器（幂等）；本地 diff + `--publish` → exit 1 |
+
+真实平台发布状态：**未实测**（无测试仓库与授权凭证）。发布器逻辑全部经 httpx MockTransport 验证；
+具备凭证时对测试仓库运行 `cra review https://github.com/<测试组织>/<测试仓库>/pull/1 --publish` 即可单独验证。
+
+### 下一步
+
+- Phase 11：最终测试、文档与打包——全量回归、一键演示脚本、架构/安全文档、示例工件、干净环境复现。
+
 ## Phase 9 — 安全边界（2026-09-24 完成）
 
 ### 完成项

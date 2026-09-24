@@ -144,6 +144,81 @@ def test_cli_trace_command_returns_full_chain(tmp_path, buggy_diff_path):
     assert "sk-live-9f8e7d6c5b4a3210" not in export_path.read_text(encoding="utf-8")
 
 
+def test_cli_publish_flag_gates_and_records(tmp_path, buggy_diff_path, monkeypatch):
+    import code_review_agent.cli as cli_mod
+    from code_review_agent.publishers.base import PublishReceipt
+
+    calls = {"n": 0}
+    original_builder = cli_mod.build_review_publisher
+
+    class _RecordingPublisher:
+        mode = "github"
+
+        def publish(self, **kwargs):
+            calls["n"] += 1
+            return PublishReceipt(
+                mode="github",
+                published=True,
+                posted_comments=3,
+                detail=f"发布到 PR：新增行级评论 3 条（第 {calls['n']} 次调用）",
+            )
+
+    def fake_builder(source, publish):
+        if publish:
+            return _RecordingPublisher()
+        return original_builder(source, publish)
+
+    monkeypatch.setattr(cli_mod, "build_review_publisher", fake_builder)
+
+    # 默认不带 --publish → dry-run，不调用远程发布器
+    result, db, _ = _run(buggy_diff_path, tmp_path)
+    assert result.exit_code == 0, result.output
+    assert "dry_run" in result.output
+
+    # --publish 显式授权 → 走远程发布器并记录
+    result2, db, _ = _run(buggy_diff_path, tmp_path, extra=["--publish"])
+    assert result2.exit_code == 0, result2.output
+    assert "发布到 PR" in result2.output
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        from code_review_agent.persistence.models import PublicationRecord
+        from sqlalchemy import select
+
+        records = session.scalars(
+            select(PublicationRecord).where(PublicationRecord.mode == "github")
+        ).all()
+        assert len(records) == 1
+        assert records[0].status == "sent"
+        task_id = records[0].task_id
+
+    # resume（同任务）→ 已有 sent 记录 → 幂等跳过，不再调用发布器
+    count_before = calls["n"]
+    result3 = runner.invoke(
+        app,
+        [
+            "resume",
+            task_id,
+            "--config",
+            str(_configs() / "agent.yaml"),
+            "--tools",
+            str(_configs() / "tools.yaml"),
+            "--db",
+            str(db),
+            "--report-dir",
+            str(tmp_path / "runs"),
+            "--publish",
+        ],
+    )
+    assert result3.exit_code == 0, result3.output
+    assert calls["n"] == count_before
+
+
+def test_cli_publish_with_local_diff_rejected(tmp_path, buggy_diff_path):
+    result, db, _ = _run(buggy_diff_path, tmp_path, extra=["--publish"])
+    assert result.exit_code == 1
+    assert "不支持" in result.output
+
+
 def test_cli_provider_error_has_clear_status(tmp_path):
     result, db, _ = _run("https://github.com/acme/widgets/pull/not-a-number", tmp_path)
     assert result.exit_code == 1

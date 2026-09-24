@@ -2,7 +2,7 @@
 
 一个可恢复、可观测、可扩展、带成本预算与安全边界的 Code Review Agent。
 输入 GitHub PR / GitLab MR / 本地 git diff，输出结构化 Review 报告（Markdown），
-并在显式授权后可回评到 PR/MR（Phase 10）。
+并在显式授权（`--publish`）后可回评行级评论到 PR/MR。
 
 ## 六项核心能力
 
@@ -55,7 +55,15 @@ cra review https://gitlab.com/group/project/-/merge_requests/45  # GitLab MR（�
 - `runs/<task_id>/log.jsonl` — 结构化执行日志
 - `runs/cra.sqlite` — 任务与 findings 记录
 
-GitHub/GitLab 发布、预算闸门在后续 Phase 接入（见 `docs/progress.md`）。
+发布行级评论（需显式授权，未实测真实平台）：
+
+```bash
+cra review https://github.com/owner/repo/pull/123 --publish   # GITHUB_TOKEN 已设置
+cra review https://gitlab.com/group/proj/-/merge_requests/45 --publish  # GITLAB_TOKEN 已设置
+```
+
+发布前校验 PR/MR head SHA 与任务一致，只对能定位到新增行的 findings 发表评论
+（无法定位的仅保留在报告），评论内嵌稳定锚点保证重复执行不重复发布。
 
 ## 恢复中断的任务
 
@@ -111,7 +119,8 @@ cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，
   docker 不可用时自动保持禁用。
 - **Prompt Injection 防护**：diff/PR 描述/模型输出一律作为数据处理；工具选择、沙箱开关、
   脱敏与预算决策全部由确定性代码执行，模型与 diff 内容无权改变（对抗测试覆盖）。
-- **默认不发布**：默认 dry-run，远程写入需要 Phase 10 的 `--publish` 显式授权。
+- **默认不发布**：默认 dry-run；对 GitHub PR / GitLab MR 加 `--publish` 显式授权后发布行级评论
+  （发布前校验 head SHA、只贴能定位到新增行的 findings、锚点幂等去重）。
 
 ## 接入真实 LLM（可选，已支持）
 

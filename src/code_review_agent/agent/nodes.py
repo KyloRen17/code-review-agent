@@ -398,6 +398,10 @@ class ReviewPipeline:
             task_id=task_id,
             report_path=state["report_path"],
             findings=state.get("validated_findings", []),
+            input_ref=state.get("input_ref", ""),
+            base_sha=state.get("base_sha"),
+            head_sha=state.get("head_sha"),
+            diff_files=state.get("diff_files", []),
         )
         with self.session_factory() as session:
             ops.save_publication(
@@ -405,8 +409,10 @@ class ReviewPipeline:
                 task_id=task_id,
                 mode=mode,
                 idempotency_key=f"{task_id}:{mode}",
-                status="sent" if receipt.published else "dry_run",
+                status="sent" if receipt.published else ("failed" if receipt.failed else "dry_run"),
                 detail=receipt.detail,
                 receipt=receipt.model_dump_json(),
             )
+        if receipt.failed:
+            logger.warning("publish_failed", extra={"task_id": task_id, "detail": receipt.detail})
         return {"publish_receipt": receipt.model_dump()}

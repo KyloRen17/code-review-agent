@@ -11,10 +11,20 @@ class DryRunPublisher:
 
     mode = "dry_run"
 
-    def publish(self, *, task_id: str, report_path: str, findings: list[Finding]) -> PublishReceipt:
+    def publish(
+        self,
+        *,
+        task_id: str,
+        report_path: str,
+        findings: list[Finding],
+        input_ref: str = "",
+        base_sha: str | None = None,
+        head_sha: str | None = None,
+        diff_files: list | None = None,
+    ) -> PublishReceipt:
         exists = Path(report_path).is_file()
         detail = (
-            f"报告已生成: {report_path}；未执行任何远程写入（远程发布需 --publish 显式授权，Phase 10 提供）"
+            f"报告已生成: {report_path}；未执行任何远程写入（远程发布需 --publish 显式授权）"
             if exists
             else f"报告文件缺失: {report_path}"
         )

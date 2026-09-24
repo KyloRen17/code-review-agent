@@ -19,7 +19,7 @@ from .persistence.db import create_db_engine, init_db, make_session_factory
 from .persistence.models import TaskRecord, WorkUnitRecord
 from .providers import build_provider, detect_source
 from .providers.base import ProviderError
-from .publishers.dry_run import DryRunPublisher
+from .publishers import build_review_publisher
 from .tools.dispatcher import build_dispatcher
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="Code Review Agent")
@@ -58,7 +58,8 @@ def _build_budget(settings, session_factory) -> BudgetController | None:
 
 
 def _execute(
-    settings, tools_config: Path, input_ref: str, task_id: str, session_factory, *, fresh: bool
+    settings, tools_config: Path, input_ref: str, task_id: str, session_factory, *, fresh: bool,
+    publisher=None,
 ):
     gateway = build_gateway(settings)
     dispatcher = build_dispatcher(tools_config)
@@ -67,7 +68,7 @@ def _execute(
         settings=settings,
         gateway=gateway,
         dispatcher=dispatcher,
-        publisher=DryRunPublisher(),
+        publisher=publisher or build_review_publisher(detect_source(input_ref), publish=False),
         provider=provider,
         task_id=task_id,
         session_factory=session_factory,
@@ -143,14 +144,21 @@ def review(
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
     budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
+    publish: bool = typer.Option(False, "--publish", help="显式授权发布行级评论到 PR/MR（默认 dry-run）"),
 ):
     """审查输入 diff，生成 Markdown 报告。默认 dry-run，不做任何远程写入。"""
     settings = _load_settings_with_overrides(config, db, report_dir, llm)
     if budget is not None:
         settings.budget.limit = budget
 
-    task_id = uuid.uuid4().hex[:12]
     source = detect_source(input_ref)
+    try:
+        publisher = build_review_publisher(source, publish)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    task_id = uuid.uuid4().hex[:12]
     out_dir = Path(settings.storage.report_dir) / task_id
     out_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(out_dir / "log.jsonl")
@@ -170,7 +178,7 @@ def review(
         session.commit()
 
     try:
-        final = _execute(settings, tools_config, input_ref, task_id, session_factory, fresh=True)
+        final = _execute(settings, tools_config, input_ref, task_id, session_factory, fresh=True, publisher=publisher)
     except Exception as exc:
         _mark_failed(task_id, session_factory, str(exc))
         typer.echo(f"任务失败: {exc}", err=True)
@@ -188,6 +196,7 @@ def resume(
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
     budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
+    publish: bool = typer.Option(False, "--publish", help="显式授权发布行级评论到 PR/MR（默认 dry-run）"),
 ):
     """恢复中断/失败的任务：已完成单元跳过，失败/预算跳过单元安全重试。"""
     settings = _load_settings_with_overrides(config, db, report_dir, llm)
@@ -248,7 +257,12 @@ def resume(
 
     typer.echo(f"恢复任务 {task_id}（{input_ref}）")
     try:
-        final = _execute(settings, tools_config, input_ref, task_id, session_factory, fresh=False)
+        publisher = build_review_publisher(detect_source(input_ref), publish)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+    try:
+        final = _execute(settings, tools_config, input_ref, task_id, session_factory, fresh=False, publisher=publisher)
     except Exception as exc:
         _mark_failed(task_id, session_factory, str(exc))
         typer.echo(f"恢复失败: {exc}", err=True)
