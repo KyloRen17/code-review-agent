@@ -149,6 +149,11 @@ class RecheckService:
                 )
             elif verdict.verdict == "rejected":
                 notes.append(f"丢弃 {f.finding_id} ({f.title}): 复核驳回 — {verdict.reason}")
+                # 驳回结论持久化（自测发现的缺陷修复）：真实模型的复核裁决是非确定性的，
+                # 若不落库，resume 重跑会重新复核甚至“复活”已驳回的 finding
+                rejected = f.model_copy(update={"recheck": recheck_info})
+                with self.session_factory() as session:
+                    ops.save_finding(session, rejected)
             else:
                 results.append(
                     f.model_copy(

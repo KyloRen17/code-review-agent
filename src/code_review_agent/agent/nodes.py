@@ -248,6 +248,33 @@ class ReviewPipeline:
                 parsed = parse_llm_findings(response.content)
             except Exception as exc:
                 errors.append(f"LLM 输出未通过 Schema 校验 ({unit.unit_id}): {exc}")
+                # 调用已发生且已计费：留存调用记录（含坏响应脱敏快照，可追溯）并按
+                # 实际 usage 结算，不让预留额永久挂账（自测发现的账目漏洞修复）
+                duration_ms = int((time.monotonic() - started) * 1000)
+                redacted_system, _ = redact(request.system)
+                redacted_user, _ = redact(request.prompt)
+                redacted_bad_response, _ = redact(response.content)
+                with self.session_factory() as session:
+                    ops.save_llm_call(
+                        session,
+                        call_id=call_id,
+                        task_id=task_id,
+                        unit_id=unit.unit_id,
+                        model=response.model,
+                        prompt_version=PROMPT_VERSION,
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                        duration_ms=duration_ms,
+                        finish_reason=response.finish,
+                        span_id=span_id,
+                        system_prompt=redacted_system,
+                        user_prompt=redacted_user,
+                        response=redacted_bad_response,
+                    )
+                if self.budget is not None and reservation is not None:
+                    self.budget.settle(
+                        task_id, reservation, response.usage.input_tokens, response.usage.output_tokens
+                    )
                 self._persist_unit(
                     task_id, unit, WorkUnitStatus.failed, error=f"schema: {exc}"
                 )
@@ -339,7 +366,13 @@ class ReviewPipeline:
             work_units=state.get("work_units"),
         )
         if self.settings.review.recheck:
-            candidates = [f for f in validated if f.confidence == Confidence.high]
+            # 只复核尚未复核过的高置信候选：复核结论（含驳回）已持久化，
+            # resume 重跑不重复复核（真实模型复核非确定性，重据骰子会造成结论抖动）
+            candidates = [
+                f
+                for f in validated
+                if f.confidence == Confidence.high and not f.recheck
+            ]
             if candidates:
                 service = RecheckService(
                     self.gateway,
@@ -359,6 +392,8 @@ class ReviewPipeline:
                     if f.finding_id not in rejected_ids
                 ]
                 dropped.extend(notes)
+        # 已持久化驳回结论的 finding（resume 从 DB 重新加载的场景）不进入最终输出
+        validated = [f for f in validated if (f.recheck or {}).get("verdict") != "rejected"]
         with self.session_factory() as session:
             for f in validated:
                 ops.save_finding(session, f)  # 验证/分级/复核结果落库（幂等 upsert）

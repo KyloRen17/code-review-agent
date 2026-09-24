@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from code_review_agent.agent.graph import build_review_graph
 from code_review_agent.agent.nodes import ReviewPipeline
@@ -121,6 +122,61 @@ def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_p
     report = Path(final["report_path"]).read_text(encoding="utf-8")
     assert "## 错误" in report
     assert "未发现可确认问题" in report
+
+
+def test_invalid_llm_output_settles_budget_and_keeps_call_trace(
+    tmp_path, agent_config_path, tools_config_path, buggy_diff_path, session_factory
+):
+    """回归（真实模型自测发现的账目漏洞）：Schema 校验失败的调用已发生即已计费——
+    必须按实际 usage 结算（不留挂账预留），且留存调用记录（坏响应脱敏快照可追溯）。"""
+    from sqlalchemy import select
+
+    from code_review_agent.budget import BudgetController, BudgetLedger
+    from code_review_agent.budget.pricing import ModelPrice, PricingTable
+    from code_review_agent.persistence.models import LLMCallRecord
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "这不是 JSON"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        )
+
+    settings = _settings(tmp_path, agent_config_path)
+    settings.review.recheck = False
+    settings.model.name = "gpt-test"  # 与网关一致：预算闸门按 settings.model.name 查单价（fail-closed）
+    pricing = PricingTable({"gpt-test": ModelPrice(input_per_1k=1.0, output_per_1k=1.0)}, "CNY")
+    budget = BudgetController(pricing, BudgetLedger(session_factory, 100.0, "CNY"))
+    gateway = OpenAICompatGateway(
+        model_name="gpt-test", api_key="sk-test", client=_client(handler), base_url="https://llm.test/v1"
+    )
+    pipeline = ReviewPipeline(
+        settings=settings,
+        gateway=gateway,
+        dispatcher=build_dispatcher(tools_config_path),
+        publisher=DryRunPublisher(),
+        provider=_local_provider(buggy_diff_path),
+        task_id="oaimock3",
+        session_factory=session_factory,
+        budget=budget,
+    )
+    final = build_review_graph(pipeline).invoke(
+        {"task_id": "oaimock3", "input_ref": str(buggy_diff_path), "source": "local"},
+        config={"recursion_limit": 100},
+    )
+
+    assert all(u.status == WorkUnitStatus.failed for u in final["work_units"])
+    snap = budget.snapshot("oaimock3")
+    assert snap["spent"] == pytest.approx(0.03)  # 2 × (10入+5出)/1000 × 1.0
+    assert snap["reserved"] == 0.0  # 无挂账预留
+    with session_factory() as session:
+        rows = session.scalars(
+            select(LLMCallRecord).where(LLMCallRecord.task_id == "oaimock3")
+        ).all()
+        assert len(rows) == 2  # 坏响应同样留痕
+        assert all("这不是 JSON" in (r.response or "") for r in rows)
 
 
 def _local_provider(diff_path):

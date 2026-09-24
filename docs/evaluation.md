@@ -29,7 +29,7 @@
 | 项 | 状态 | 命令 |
 |---|---|---|
 | 真实 LLM | **已验证**（2026-09-24，qwen3.8-flash：6 次调用、已结算 ¥0.0322、trace 脱敏 0 泄露，证据见 progress.md） | `cra review examples/buggy.diff --llm openai --model qwen3.8-flash` |
-| GitHub 真实读取 | `GITHUB_TOKEN` + 可访问 PR | `cra review https://github.com/o/r/pull/N` |
+| GitHub 真实读取 | **已验证**（2026-09-24，公开 PR 真实拉取含 SHA 元数据；私有仓库仍需 GITHUB_TOKEN） | `cra review https://github.com/o/r/pull/N` |
 | GitHub 真实发布 | 测试仓库 + 授权 | `cra review ... --publish`（重复执行验证幂等） |
 | GitLab 同理 | `GITLAB_TOKEN` | 同上（MR 链接） |
 | 沙箱 | 本机 docker | 在 `configs/tools.yaml` 开启 `sandbox.enabled` 与 `typecheck.enabled` 后 review 全量新增文件 diff |

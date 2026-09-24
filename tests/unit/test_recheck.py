@@ -143,6 +143,83 @@ def test_parse_recheck_verdict():
         parse_recheck_verdict('{"verdict": "maybe"}')
 
 
+def test_recheck_verdict_durable_across_resume(
+    tmp_path, buggy_diff_path, session_factory, tools_config_path
+):
+    """回归（真实模型自测发现的缺陷）：复核驳回结论必须持久化。
+
+    真实模型的复核裁决是非确定性的：若驳回不落库，resume 重跑会重新复核，
+    已驳回的 finding 可能因裁决翻转而“复活”，且重复复核浪费预算。
+    """
+    from sqlalchemy import select
+
+    from code_review_agent.agent.graph import build_review_graph
+    from code_review_agent.agent.nodes import ReviewPipeline
+    from code_review_agent.persistence.models import FindingRecord
+    from code_review_agent.providers.local import LocalDiffProvider
+    from code_review_agent.publishers.dry_run import DryRunPublisher
+    from code_review_agent.tools.dispatcher import build_dispatcher
+
+    class _FlakyRecheckGateway:
+        name = "flaky"
+
+        def __init__(self):
+            self._inner = MockLLMGateway()
+            self.recheck_calls = 0
+            # 第二轮若重据骰子，裁决会翻案（模拟非确定性）
+            self.verdicts = ["rejected", "rejected", "rejected", "confirmed", "confirmed", "confirmed"]
+
+        def complete(self, request: LLMRequest) -> LLMResponse:
+            if request.context.get("purpose") == "recheck":
+                self.recheck_calls += 1
+                verdict = self.verdicts[min(self.recheck_calls - 1, len(self.verdicts) - 1)]
+                content = json.dumps(
+                    {"verdict": verdict, "reason": "模拟非确定性裁决"}, ensure_ascii=False
+                )
+                return LLMResponse(
+                    call_id=request.call_id,
+                    model="flaky",
+                    content=content,
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+            return self._inner.complete(request)
+
+    settings = load_settings(tools_config_path.parent / "agent.yaml")
+    settings.storage.report_dir = str(tmp_path / "runs")
+    gateway = _FlakyRecheckGateway()
+    pipeline = ReviewPipeline(
+        settings=settings,
+        gateway=gateway,
+        dispatcher=build_dispatcher(tools_config_path),
+        publisher=DryRunPublisher(),
+        provider=LocalDiffProvider(),
+        task_id="recheck2",
+        session_factory=session_factory,
+    )
+    initial = {"task_id": "recheck2", "input_ref": str(buggy_diff_path), "source": "local"}
+    graph = build_review_graph(pipeline)
+
+    final1 = graph.invoke(initial, {"recursion_limit": 100})
+    # 首轮：3 个高置信候选全部被驳回，只剩参考级 findings
+    assert not [f for f in final1["validated_findings"] if f.confidence == Confidence.high]
+    assert len(final1["validated_findings"]) == 4
+    assert gateway.recheck_calls == 3
+    with session_factory() as session:
+        records = session.scalars(
+            select(FindingRecord).where(
+                FindingRecord.task_id == "recheck2", FindingRecord.recheck.is_not(None)
+            )
+        ).all()
+        assert len(records) == 3
+        assert {json.loads(r.recheck)["verdict"] for r in records} == {"rejected"}
+
+    # resume 重跑（已完成单元从 DB 加载）：不重复复核、已驳回不复活
+    final2 = graph.invoke(initial, {"recursion_limit": 100})
+    assert gateway.recheck_calls == 3
+    assert not [f for f in final2["validated_findings"] if f.confidence == Confidence.high]
+    assert len(final2["validated_findings"]) == 4
+
+
 def test_full_pipeline_recheck_visible_in_report_and_trace(
     tmp_path, buggy_diff_path, session_factory, tools_config_path
 ):

@@ -3,6 +3,40 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## 变更记录 — 真实自测（agent 审自己的 PR）+ 两处缺陷修复（2026-09-24，分支 feat/env-auto-load）
+
+### 自测执行（真实 GitHub PR + 真实 LLM）
+
+- 命令：`cra review https://github.com/KyloRen17/code-review-agent/pull/1 --llm openai --model qwen3.8-flash`
+- **GitHub PR 真实读取首次实测通过**（此前标注"未实测"）：公开 PR 无需 token，
+  PR 元数据 SHA `b510f44 → 55d403c` 进入报告"变更区间"。
+- 任务 `97ead1d2d55d`：13 工作单元（11 完成 / 2 失败——真实网络读超时 ×1、模型输出
+  附带额外字段被严格 Schema 拒绝 ×1；故障隔离生效，流水线不中断）；15 次调用、
+  已结算 ¥0.0607；7 findings（高置信 1 / 参考 6）；2 处 secret 保守掩码。
+- `resume` 重试 2 个失败单元：均成功（+2 条新 findings，含对测试断言与注释一致性的
+  真实意见）；高置信唯一一条走完 新增行+证据匹配+复核 confirmed 全链；
+  复核驳回 2 条（理由写入报告）。
+
+### 自测发现的两处真实缺陷（已修复 + 回归测试）
+
+1. **复核结论不持久 → resume 抖动**（`review/recheck.py` + `agent/nodes.py`）：
+   驳回/确认结论原先不落库，resume 重跑会对已完成 finding 重新复核——真实模型
+   裁决非确定性，实测出现"已驳回项复活为参考级、已确认高置信项消失"的双向抖动。
+   修复：驳回结论持久化到 findings 表；已复核项不再重复复核（省预算）；
+   已持久化驳回的 finding 不进入最终输出。回归测试：
+   `test_recheck_verdict_durable_across_resume`（可翻转裁决的假网关证明旧代码会复活）。
+2. **Schema 失败的调用不结算不留痕**（`agent/nodes.py`）：模型响应已计费但解析
+   失败时，预留额永久挂账（实测 ¥0.0064 悬置）且坏响应无调用记录。修复：失败
+   路径同样写 llm_calls（脱敏快照可追溯）并按实际 usage 结算。回归测试：
+   `test_invalid_llm_output_settles_budget_and_keeps_call_trace`。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/` | **161 passed**（159 + 2 个新回归） |
+| 修复后再次 `cra resume 97ead1d2d55d` | 幂等 no-op；复核调用数 8→8 不变、findings 稳定（不再抖动） |
+
 ## 变更记录 — 真实 LLM 已实测 + `--model` 参数（2026-09-24，分支 feat/env-auto-load）
 
 ### 完成项
