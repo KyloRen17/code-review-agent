@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 import uuid
 from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import AgentSettings
 from ..diff.parser import parse_unified_diff
 from ..llm.gateway import LLMGateway, LLMRequest
 from ..llm.prompts import PROMPT_VERSION, build_review_prompt
 from ..llm.schemas import parse_llm_findings
+from ..persistence import ops
+from ..persistence.models import LLMCallRecord
 from ..providers.base import RepositoryProvider
-from ..publishers.base import ReviewPublisher
+from ..publishers.base import PublishReceipt, ReviewPublisher
 from ..review.finding import Confidence, Finding, Severity
 from ..review.report import render_markdown
 from ..review.validator import validate_and_grade
@@ -23,10 +30,17 @@ from .work_units import WorkUnit, WorkUnitStatus, build_work_units
 logger = logging.getLogger("cra.pipeline")
 
 
+def _stable_finding_id(task_id: str, file: str, line: int | None, title: str) -> str:
+    raw = f"{task_id}|{file}|{line}|{title}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:12]
+
+
 class ReviewPipeline:
     """所有 LangGraph 节点的宿主。
 
     节点只做确定性的编排：安全扫描、预算与验证决策均由本类（而非 LLM）执行。
+    llm_analyze 按工作单元增量持久化（unit 状态 + findings + LLM 调用账目），
+    崩溃后 resume 时已完成单元直接跳过、不重复调用模型。
     """
 
     def __init__(
@@ -38,6 +52,7 @@ class ReviewPipeline:
         publisher: ReviewPublisher,
         provider: RepositoryProvider,
         task_id: str,
+        session_factory: sessionmaker[Session],
     ) -> None:
         self.settings = settings
         self.gateway = gateway
@@ -45,11 +60,15 @@ class ReviewPipeline:
         self.publisher = publisher
         self.provider = provider
         self.task_id = task_id
+        self.session_factory = session_factory
 
     # ------------------------------------------------------------------
     def load_input(self, state: GraphState) -> dict:
         review_input = self.provider.fetch(state["input_ref"])
-        logger.info("input_loaded", extra={"source": review_input.source, "bytes": len(review_input.raw_diff)})
+        logger.info(
+            "input_loaded",
+            extra={"source": review_input.source, "bytes": len(review_input.raw_diff)},
+        )
         return {
             "raw_diff": review_input.raw_diff,
             "input_fingerprint": review_input.fingerprint,
@@ -61,7 +80,10 @@ class ReviewPipeline:
     def security_scan(self, state: GraphState) -> dict:
         redacted, report = redact(state["raw_diff"])
         if report.matches:
-            logger.warning("secrets_redacted", extra={"matches": report.matches, "kinds": report.by_kind})
+            logger.warning(
+                "secrets_redacted",
+                extra={"matches": report.matches, "kinds": report.by_kind},
+            )
         return {"redacted_diff": redacted, "redaction": report}
 
     def normalize_diff(self, state: GraphState) -> dict:
@@ -74,7 +96,9 @@ class ReviewPipeline:
         units, notes = build_work_units(
             state["task_id"], state["diff_files"], self.settings.limits.max_work_unit_bytes
         )
-        logger.info("work_units_built", extra={"units": len(units), "skipped": len(notes)})
+        logger.info(
+            "work_units_built", extra={"units": len(units), "skipped": len(notes)}
+        )
         return {"work_units": units, "unit_notes": notes}
 
     def select_tools(self, state: GraphState) -> dict:
@@ -95,13 +119,34 @@ class ReviewPipeline:
         return {"tool_results": results}
 
     def llm_analyze(self, state: GraphState) -> dict:
+        task_id = state["task_id"]
         findings: list[Finding] = []
         errors: list[str] = []
         updated: list[WorkUnit] = []
         usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+        with self.session_factory() as session:
+            persisted = ops.load_work_units(session, task_id)
+            done_unit_ids = {
+                uid for uid, record in persisted.items() if record.status == "done"
+            }
+            failed_count = sum(1 for r in persisted.values() if r.status == "failed")
+            if done_unit_ids:
+                call_unit = dict(
+                    session.execute(
+                        select(LLMCallRecord.call_id, LLMCallRecord.unit_id).where(
+                            LLMCallRecord.task_id == task_id
+                        )
+                    ).all()
+                )
+                done_calls = {
+                    cid for cid, uid in call_unit.items() if uid in done_unit_ids
+                }
+                findings.extend(f for f in ops.load_findings(session, task_id) if f.origin in done_calls)
+
         for unit in state.get("work_units", []):
-            if unit.status != WorkUnitStatus.pending:
-                updated.append(unit)
+            if unit.unit_id in done_unit_ids:
+                updated.append(unit.model_copy(update={"status": WorkUnitStatus.done}))
                 continue
             call_id = uuid.uuid4().hex[:12]
             system, prompt = build_review_prompt(unit)
@@ -113,23 +158,31 @@ class ReviewPipeline:
                 context={"file": unit.file, "code": unit.content, "new_start": unit.start_line},
                 max_output_tokens=self.settings.model.max_output_tokens,
             )
+            started = time.monotonic()
             try:
                 response = self.gateway.complete(request)
             except Exception as exc:
                 errors.append(f"LLM 调用失败 ({unit.unit_id}): {exc}")
+                self._persist_unit(
+                    task_id, unit, WorkUnitStatus.failed, error=str(exc)
+                )
                 updated.append(unit.model_copy(update={"status": WorkUnitStatus.failed}))
                 continue
             try:
                 parsed = parse_llm_findings(response.content)
             except Exception as exc:
                 errors.append(f"LLM 输出未通过 Schema 校验 ({unit.unit_id}): {exc}")
+                self._persist_unit(
+                    task_id, unit, WorkUnitStatus.failed, error=f"schema: {exc}"
+                )
                 updated.append(unit.model_copy(update={"status": WorkUnitStatus.failed}))
                 continue
+            unit_findings: list[Finding] = []
             for lf in parsed.findings:
-                findings.append(
+                unit_findings.append(
                     Finding(
-                        task_id=state["task_id"],
-                        finding_id=uuid.uuid4().hex[:12],
+                        finding_id=_stable_finding_id(task_id, lf.file, lf.line, lf.title),
+                        task_id=task_id,
                         file=lf.file,
                         line=lf.line,
                         title=lf.title,
@@ -142,11 +195,50 @@ class ReviewPipeline:
                         origin=call_id,
                     )
                 )
+            findings.extend(unit_findings)
+            duration_ms = int((time.monotonic() - started) * 1000)
+            with self.session_factory() as session:
+                ops.save_llm_call(
+                    session,
+                    call_id=call_id,
+                    task_id=task_id,
+                    unit_id=unit.unit_id,
+                    model=response.model,
+                    prompt_version=PROMPT_VERSION,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    duration_ms=duration_ms,
+                )
+                for f in unit_findings:
+                    ops.save_finding(session, f)
+            self._persist_unit(task_id, unit, WorkUnitStatus.done)
             updated.append(unit.model_copy(update={"status": WorkUnitStatus.done}))
             usage["calls"] += 1
             usage["input_tokens"] += response.usage.input_tokens
             usage["output_tokens"] += response.usage.output_tokens
-        return {"findings": findings, "work_units": updated, "usage_total": usage, "errors": errors}
+
+        if failed_count:
+            logger.info("units_retrying", extra={"previously_failed": failed_count})
+        return {
+            "findings": findings,
+            "work_units": updated,
+            "usage_total": usage,
+            "errors": errors,
+        }
+
+    def _persist_unit(
+        self, task_id: str, unit: WorkUnit, status: WorkUnitStatus, error: str | None = None
+    ) -> None:
+        with self.session_factory() as session:
+            ops.save_work_unit(
+                session,
+                task_id=task_id,
+                unit_id=unit.unit_id,
+                file=unit.file,
+                status=status.value,
+                fingerprint=unit.fingerprint,
+                error=error,
+            )
 
     def validate_findings(self, state: GraphState) -> dict:
         validated, dropped = validate_and_grade(
@@ -156,6 +248,8 @@ class ReviewPipeline:
 
     def generate_report(self, state: GraphState) -> dict:
         findings = state.get("validated_findings", [])
+        with self.session_factory() as session:
+            usage_total = ops.load_usage(session, state["task_id"])
         report_dir = Path(self.settings.storage.report_dir) / state["task_id"]
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "report.md"
@@ -169,7 +263,7 @@ class ReviewPipeline:
             prompt_version=PROMPT_VERSION,
             findings=findings,
             work_units=state.get("work_units", []),
-            usage_total=state.get("usage_total", {}),
+            usage_total=usage_total,
             tool_results=state.get("tool_results", []),
             unit_notes=state.get("unit_notes", []),
             dropped_notes=state.get("dropped_notes", []),
@@ -181,7 +275,26 @@ class ReviewPipeline:
         return {"report_path": str(report_path)}
 
     def publish(self, state: GraphState) -> dict:
+        task_id = state["task_id"]
+        mode = self.publisher.mode
+        with self.session_factory() as session:
+            record = ops.get_publication(session, task_id, mode)
+            if record is not None and record.status in ("sent", "confirmed", "dry_run"):
+                receipt = PublishReceipt.model_validate_json(record.receipt or "{}")
+                return {"publish_receipt": receipt.model_dump()}
         receipt = self.publisher.publish(
-            task_id=state["task_id"], report_path=state["report_path"], findings=state.get("validated_findings", [])
+            task_id=task_id,
+            report_path=state["report_path"],
+            findings=state.get("validated_findings", []),
         )
+        with self.session_factory() as session:
+            ops.save_publication(
+                session,
+                task_id=task_id,
+                mode=mode,
+                idempotency_key=f"{task_id}:{mode}",
+                status="sent" if receipt.published else "dry_run",
+                detail=receipt.detail,
+                receipt=receipt.model_dump_json(),
+            )
         return {"publish_receipt": receipt.model_dump()}

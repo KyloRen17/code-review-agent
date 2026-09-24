@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..agent.work_units import WorkUnit, WorkUnitStatus
 from ..security.redactor import RedactionReport
 from ..tools.base import ToolResult
 from .finding import Confidence, Finding, Severity
@@ -14,6 +13,10 @@ _SEVERITY_ORDER = [
     Severity.low,
     Severity.info,
 ]
+
+
+def _status_value(unit) -> str:
+    return getattr(getattr(unit, "status", None), "value", "pending") or "pending"
 
 
 def _finding_section(f: Finding) -> str:
@@ -44,7 +47,7 @@ def render_markdown(
     model: str,
     prompt_version: str,
     findings: list[Finding],
-    work_units: list[WorkUnit],
+    work_units: list,
     usage_total: dict,
     tool_results: list[ToolResult],
     unit_notes: list[str],
@@ -53,8 +56,8 @@ def render_markdown(
     redaction: RedactionReport | None,
 ) -> str:
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    done = sum(1 for u in work_units if u.status == WorkUnitStatus.done)
-    failed = sum(1 for u in work_units if u.status == WorkUnitStatus.failed)
+    done = sum(1 for u in work_units if _status_value(u) == "done")
+    failed = sum(1 for u in work_units if _status_value(u) == "failed")
     high = [f for f in findings if f.confidence == Confidence.high]
     reference = [f for f in findings if f.confidence == Confidence.reference]
 

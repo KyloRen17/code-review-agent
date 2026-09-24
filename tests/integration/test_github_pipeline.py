@@ -37,7 +37,7 @@ def _handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, json=PR_META)
 
 
-def test_full_pipeline_with_github_mock_provider(tmp_path, agent_config_path, tools_config_path):
+def test_full_pipeline_with_github_mock_provider(tmp_path, agent_config_path, tools_config_path, session_factory):
     settings = load_settings(agent_config_path)
     settings.storage.report_dir = str(tmp_path)
     client = httpx.Client(transport=httpx.MockTransport(_handler))
@@ -48,6 +48,7 @@ def test_full_pipeline_with_github_mock_provider(tmp_path, agent_config_path, to
         publisher=DryRunPublisher(),
         provider=GitHubPRProvider(client=client, token="t"),
         task_id="ghmock1",
+        session_factory=session_factory,
     )
     final = build_review_graph(pipeline).invoke(
         {"task_id": "ghmock1", "input_ref": PR_URL, "source": "github"},

@@ -8,12 +8,12 @@
 
 | 能力 | 状态 | 位置 |
 |---|---|---|
-| Checkpoint 与异常恢复 | Phase 5 | `checkpoint/`、`persistence/` |
+| Checkpoint 与异常恢复 | **已实现**（Phase 5） | `checkpoint/`、`persistence/`、`agent/nodes.py` |
 | 评论级 Trace 与可观测 | Phase 6 | `observability/`、`persistence/` |
-| 声明式工具注册 | Phase 1（骨架）→ Phase 4（完整） | `tools/`、`configs/tools.yaml` |
+| 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
 | Token/金额预算 | Phase 7 | `budget/`、`configs/model_pricing.yaml` |
-| 置信度分级 | Phase 1（最小）→ Phase 8（完整） | `review/validator.py` |
-| Secret 防护与安全执行 | Phase 1（最小）→ Phase 9（完整） | `security/` |
+| 置信度分级 | 最小版（Phase 1）→ Phase 8（完整） | `review/validator.py` |
+| Secret 防护与安全执行 | 最小版（Phase 1）→ Phase 9（完整） | `security/` |
 
 当前进度见 `docs/progress.md`。
 
@@ -56,6 +56,16 @@ cra review https://gitlab.com/group/project/-/merge_requests/45  # GitLab MR（�
 - `runs/cra.sqlite` — 任务与 findings 记录
 
 GitHub/GitLab 发布、预算闸门在后续 Phase 接入（见 `docs/progress.md`）。
+
+## 恢复中断的任务
+
+```bash
+cra resume <task_id>   # task_id 见 review 输出或 runs/cra.sqlite 的 tasks 表
+```
+
+- 崩溃后从 checkpoint 续跑：已完成的工作单元直接跳过，不重复调用模型；
+- 已完成任务中存在失败单元时，`resume` 只重试失败单元；
+- 恢复前重新校验输入（本地 diff 指纹 / PR/MR head SHA）：输入已变化则任务标记 `stale` 并要求新建任务。
 
 ## 接入真实 LLM（可选，已支持）
 

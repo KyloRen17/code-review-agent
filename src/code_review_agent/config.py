@@ -28,6 +28,11 @@ class StorageConfig(BaseModel):
     db: str = "runs/cra.sqlite"
     report_dir: str = "runs"
 
+    @property
+    def checkpoint_db(self) -> str:
+        p = Path(self.db)
+        return str(p.with_name(p.stem + ".ckpt.sqlite"))
+
 
 class LimitsConfig(BaseModel):
     max_diff_bytes: int = 5 * 1024 * 1024

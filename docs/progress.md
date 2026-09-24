@@ -3,6 +3,51 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 5 — 持久化 Checkpoint 与恢复（2026-09-24 完成）
+
+### 完成项
+
+- **LangGraph 持久化 Checkpointer**：`checkpoint/create_checkpointer`——SQLite saver（`langgraph-checkpoint-sqlite`），
+  路径自动从 db 路径派生（`<db>.ckpt.sqlite`）；显式配置 msgpack 反序列化白名单
+  （state 中的 pydantic 类型逐一登记，消除"未来版本将被禁止"的警告，也避免反序列化任意类的安全风险）。
+- **单元级增量持久化**（`agent/nodes.py` + `persistence/ops.py`）：
+  - `work_units` 表：每个工作单元完成/失败即落库（崩溃不丢已完成进度）；
+  - `findings` 表：`finding_id` 改为确定性哈希 `(task_id|file|line|title)`，UNIQUE(task_id, finding_id) 约束 → 天然幂等；
+  - `llm_calls` 表：每次模型调用的 usage/耗时入账（Phase 6 trace 与 Phase 7 预算的账本基础）；
+  - `publications` 表：发布幂等键 `task_id:mode`，已有 dry_run/sent/confirmed 记录直接复用，不再重复发布。
+- **`cra resume <task_id>` 命令**：
+  - 任务不存在 / 已 stale → 明确报错退出；
+  - 恢复前重新拉取输入并校验：本地 diff 比对 sha256 指纹，GitHub/GitLab 比对 head SHA；输入已变化 → 任务标记 `stale` 并要求新建任务；
+  - 已完成且无失败单元 → 幂等 no-op（打印报告路径）；
+  - 已完成但存在失败单元 → 只重试失败单元（已 done 单元跳过，不重复调用模型）；
+  - 崩溃中断 → `graph.get_state().next` 判断存在未完成节点时从 checkpoint 续跑（`invoke(None, thread_id)`）；
+    无 checkpoint（provider 阶段即失败）→ 完整重跑（llm_analyze 仍跳过已完成单元）。
+- `review` 失败时输出 `可恢复: cra resume <task_id>` 提示。
+- 修复 report.py 对 agent 包的反向依赖（循环导入）。
+
+### 关键设计决策
+
+- 恢复的"是否重跑"由**数据库中的单元状态**决定而非仅 LangGraph checkpoint：崩溃可能发生在节点内部
+  （llm_analyze 循环中途），checkpoint 只覆盖节点边界，单元级进度必须由我们自己的账本承载。
+  两层机制并存：checkpoint 负责节点边界，work_units/findings 账本负责单元边界。
+- 重试"已完成任务中的失败单元"用 `invoke(新输入, 同 thread)`：节点重跑但 LLM 只为失败单元调用
+  （幂等由账本保证），这是"预算不浪费"与"恢复完整性"的折中。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **102 passed**（新增 recovery 4：崩溃续跑不重做已完成单元、CLI 失败单元重试、输入变化 stale、早期失败后恢复成功） |
+| 崩溃注入（llm_analyze 第 2 单元 KeyboardInterrupt） | 单元 1 完成落库（5 findings）；"重启进程"（新引擎/新连接/新 pipeline）后续跑，网关只被调用 1 次（未完成单元），最终 7 findings、发布记录唯一 |
+| 重复 resume | 线程已在 END：直接返回状态，网关调用数不变、findings/publications 不重复 |
+| CLI `resume`（stale 路径） | diff 被修改后 resume → exit 1，任务标记 stale |
+| CLI 演示回归 | `review examples/buggy.diff` 7 findings；`resume <id>` 已完成任务 → no-op；`runs/cra.ckpt.sqlite` 12 个 checkpoint |
+
+### 遗留 / 下一步
+
+- Phase 6：评论级 trace——`Comment → Finding → LLM Call → prompt/响应快照` 的可查询关联、`cra trace` 命令、
+  trace 导出与敏感数据过滤（llm_calls 表已有账目，补 prompt/响应安全快照与 span 层级）。
+
 ## Phase 4 — 声明式工具系统（2026-09-24 完成）
 
 ### 完成项

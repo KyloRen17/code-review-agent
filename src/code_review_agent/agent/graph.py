@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from .nodes import ReviewPipeline
 from .state import GraphState
@@ -19,7 +20,7 @@ _NODE_ORDER = [
 ]
 
 
-def build_review_graph(pipeline: ReviewPipeline):
+def build_review_graph(pipeline: ReviewPipeline, checkpointer: BaseCheckpointSaver | None = None):
     builder = StateGraph(GraphState)
     for name in _NODE_ORDER:
         builder.add_node(name, getattr(pipeline, name))
@@ -27,4 +28,6 @@ def build_review_graph(pipeline: ReviewPipeline):
     for a, b in zip(_NODE_ORDER, _NODE_ORDER[1:]):
         builder.add_edge(a, b)
     builder.add_edge(_NODE_ORDER[-1], END)
+    if checkpointer is not None:
+        return builder.compile(checkpointer=checkpointer)
     return builder.compile()

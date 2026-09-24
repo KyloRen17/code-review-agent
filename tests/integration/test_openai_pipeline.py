@@ -41,7 +41,7 @@ def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tools_config_path, buggy_diff_path):
+def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tools_config_path, buggy_diff_path, session_factory):
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -67,6 +67,7 @@ def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tool
         publisher=DryRunPublisher(),
         provider=_local_provider(buggy_diff_path),
         task_id="oaimock1",
+        session_factory=session_factory,
     )
     final = build_review_graph(pipeline).invoke(
         {"task_id": "oaimock1", "input_ref": str(buggy_diff_path), "source": "local"},
@@ -83,7 +84,7 @@ def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tool
     assert final["report_path"]
 
 
-def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_path, tools_config_path, buggy_diff_path):
+def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_path, tools_config_path, buggy_diff_path, session_factory):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -104,6 +105,7 @@ def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_p
         publisher=DryRunPublisher(),
         provider=_local_provider(buggy_diff_path),
         task_id="oaimock2",
+        session_factory=session_factory,
     )
     final = build_review_graph(pipeline).invoke(
         {"task_id": "oaimock2", "input_ref": str(buggy_diff_path), "source": "local"},
