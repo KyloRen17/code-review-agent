@@ -78,3 +78,15 @@ def test_cli_review_failure_on_missing_input(tmp_path):
         task = session.query(TaskRecord).one()
         assert task.status == "failed"
         assert "diff 文件不存在" in (task.error or "")
+
+
+def test_cli_provider_error_has_clear_status(tmp_path):
+    result, db, _ = _run("https://github.com/acme/widgets/pull/not-a-number", tmp_path)
+    assert result.exit_code == 1
+    assert "invalid_input" in result.output
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        task = session.query(TaskRecord).one()
+        assert task.status == "failed"
+        assert task.source == "github"
+        assert "invalid_input" in (task.error or "")

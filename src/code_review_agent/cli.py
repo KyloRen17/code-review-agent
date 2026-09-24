@@ -13,7 +13,7 @@ from .llm import build_gateway
 from .observability.logging import setup_logging
 from .persistence.db import create_db_engine, init_db, make_session_factory
 from .persistence.models import FindingRecord, TaskRecord
-from .providers.local import LocalDiffProvider
+from .providers import build_provider, detect_source
 from .publishers.dry_run import DryRunPublisher
 from .tools.registry import build_registry
 
@@ -28,7 +28,7 @@ def _root() -> None:
 @app.command()
 def review(
     input_ref: str = typer.Argument(
-        ..., help="本地 .diff/.patch 文件路径（GitHub PR / GitLab MR URL 将在 Phase 2 支持）"
+        ..., help="本地 .diff/.patch 文件路径、'-'（标准输入）、GitHub PR 链接或 GitLab MR 链接"
     ),
     config: Path = typer.Option(Path("configs/agent.yaml"), "--config", help="agent 配置文件"),
     tools_config: Path = typer.Option(Path("configs/tools.yaml"), "--tools", help="工具声明配置"),
@@ -43,6 +43,7 @@ def review(
         settings.storage.report_dir = str(report_dir)
 
     task_id = uuid.uuid4().hex[:12]
+    source = detect_source(input_ref)
     out_dir = Path(settings.storage.report_dir) / task_id
     out_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(out_dir / "log.jsonl")
@@ -55,7 +56,7 @@ def review(
         session.add(
             TaskRecord(
                 id=task_id,
-                source="local",
+                source=source,
                 input_ref=input_ref,
                 status="running",
                 model=settings.model.name,
@@ -65,19 +66,20 @@ def review(
 
     gateway = build_gateway(settings)
     registry = build_registry(tools_config)
+    provider = build_provider(input_ref, settings)
     pipeline = ReviewPipeline(
         settings=settings,
         gateway=gateway,
         registry=registry,
         publisher=DryRunPublisher(),
-        provider=LocalDiffProvider(max_bytes=settings.limits.max_diff_bytes),
+        provider=provider,
         task_id=task_id,
     )
     graph = build_review_graph(pipeline)
 
     try:
         final = graph.invoke(
-            {"task_id": task_id, "input_ref": input_ref, "source": "local"},
+            {"task_id": task_id, "input_ref": input_ref, "source": source},
             config={"recursion_limit": 100},
         )
     except Exception as exc:

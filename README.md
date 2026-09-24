@@ -41,6 +41,15 @@ cra review examples/buggy.diff
 cra review examples/buggy.diff --report-dir runs --db runs/cra.sqlite
 ```
 
+三种输入（GitHub/GitLab 适配器经 Mock API 验证，未用真实令牌实测）：
+
+```bash
+cra review examples/buggy.diff                                   # 本地 diff/patch 文件
+cat fix.diff | cra review -                                      # 标准输入
+cra review https://github.com/owner/repo/pull/123                # GitHub PR（需 GITHUB_TOKEN）
+cra review https://gitlab.com/group/project/-/merge_requests/45  # GitLab MR（需 GITLAB_TOKEN）
+```
+
 输出：
 - `runs/<task_id>/report.md` — 审查报告（按"高置信度/仅供参考"分组）
 - `runs/<task_id>/log.jsonl` — 结构化执行日志

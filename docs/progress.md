@@ -3,6 +3,38 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 2 — 三种输入与 Diff 归一化（2026-09-24 完成）
+
+### 完成项
+
+- `providers/github.py`：GitHub PR Adapter——URL 解析、元数据（title/body/base sha/head sha）、`Accept: application/vnd.github.diff` 拉 raw diff、`GITHUB_TOKEN`（Bearer，仅随请求发送，不落日志）、diff 大小上限、空 diff 拒绝。
+- `providers/gitlab.py`：GitLab MR Adapter——支持嵌套 group（project path URL-encode）、`diff_refs` 基准/目标 SHA、`PRIVATE-TOKEN` 鉴权、changes 接口按文件片段重建标准 unified diff（new_file/deleted_file 标记转 `--- /dev/null` 等）。
+- `providers/base.py`：`ProviderError`，状态码 `not_found / auth_failed / rate_limited / too_large / network / invalid_input / http`，CLI 将其写入任务记录（task.error 含 `[kind]`）并以退出码 1 终止。
+- `providers/__init__.py`：`detect_source`（github/gitlab/local URL 识别，含自建 GitLab 域名）+ `build_provider` 工厂；CLI 接入，`-` 支持 stdin。
+- `diff/parser.py`：重命名支持（`rename from/to` → `kind=renamed`，保留 hunk 可审查）。
+- `agent/work_units.py`：超大 hunk 按字节上限切分为多个 chunk（unit_id `#h0c0/#h1c1…`），每个 chunk 保留精确新文件行号；纯删除行 chunk 不产出；Mock 扫描 chunk 行号正确性有测试。
+- CLI：三种输入统一入口；ProviderError 带明确状态落库。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **77 passed**（新增：GitHub adapter 10、GitLab adapter 8、provider 选择/local 7、work_units 分块 6、validator 7、GitHub mock 全流水线集成 1、CLI ProviderError 1） |
+| `.venv/Scripts/python -m code_review_agent.cli review examples/buggy.diff` | 回归通过 |
+| 集成测试：MockTransport 注入 httpx.Client | PR/MR 全流水线（provider→graph→报告）跑通，SHA 进入报告"变更区间"，secret 不出现在报告中 |
+
+平台集成状态声明：GitHub/GitLab 适配器**仅通过 httpx MockTransport 固定响应验证**，未用真实令牌对真实平台发起请求（无凭证，按 plan 标注为**未实测**）。
+
+### 值得记录的发现
+
+- 测试 fixture 曾把 4 行新增误标为 `+1,3`，validator 按设计把越界行号的 finding 丢弃——反向验证了"不把无法定位的评论强行映射到代码行"这一验收点。
+- httpx MockTransport 注入的 client 无 base_url，相对路径会失败；provider 改为拼绝对 URL，且鉴权头随每个请求发送（注入 client 也可测鉴权）。
+
+### 遗留 / 下一步
+
+- Phase 3：真实 LLM 网关（OpenAI-compatible），统一 Mock/真实调用接口；预期结果演示 diff。
+- GitLab `changes` 接口在极新版本 GitLab 中被分页 `diffs` 接口替代；真实集成时如失败将切换（已标注未实测）。
+
 ## Phase 1 — 初始化与工程骨架（2026-09-24 完成）
 
 ### 完成项

@@ -69,6 +69,14 @@ def parse_unified_diff(text: str) -> list[DiffFile]:
             if _BINARY_RE.match(raw_line):
                 cur.kind = FileChangeKind.binary
                 continue
+            if raw_line.startswith("rename from "):
+                cur.old_path = raw_line[12:]
+                cur.kind = FileChangeKind.renamed
+                continue
+            if raw_line.startswith("rename to "):
+                cur.new_path = raw_line[10:]
+                cur.kind = FileChangeKind.renamed
+                continue
             if raw_line.startswith(_META_PREFIXES):
                 if raw_line.startswith("new file mode"):
                     cur.kind = FileChangeKind.added
