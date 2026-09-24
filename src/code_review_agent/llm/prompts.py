@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..agent.work_units import WorkUnit
 
-PROMPT_VERSION = "1.0"
+PROMPT_VERSION = "1.1"
 
 REVIEW_SYSTEM_PROMPT = """你是资深代码评审员。分析给到的代码变更，只报告"本次变更新引入"的真实问题，\
 优先级从高到低：缺陷与安全风险 > 边界条件与异常处理 > 有证据的性能问题。

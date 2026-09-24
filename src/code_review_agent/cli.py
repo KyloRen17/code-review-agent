@@ -240,6 +240,42 @@ def resume(
     _finalize(final, task_id, session_factory)
 
 
+@app.command()
+def trace(
+    finding_id: str = typer.Argument(..., help="finding ID（见报告「追溯」行）"),
+    task: str = typer.Option(None, "--task", help="限定任务 ID（finding 跨任务重名时需要）"),
+    db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
+    export: Path = typer.Option(None, "--export", help="导出完整 trace JSON 到指定文件"),
+):
+    """查询某条评论（finding）的完整追溯链：调用、prompt/响应脱敏快照、工具与 span。"""
+    settings = load_settings(Path("configs/agent.yaml"))
+    if db is not None:
+        settings.storage.db = str(db)
+    session_factory = _prepare(settings)
+    from .observability import trace as trace_mod
+
+    with session_factory() as session:
+        task_ids = trace_mod.find_task_ids_for_finding(session, finding_id)
+        if not task_ids:
+            typer.echo(f"未找到 finding: {finding_id}", err=True)
+            raise typer.Exit(code=1)
+        if task is None and len(task_ids) > 1:
+            typer.echo(
+                f"finding {finding_id} 存在于多个任务: {', '.join(task_ids)}；请用 --task 指定",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        task_id = task or task_ids[0]
+        chain = trace_mod.build_trace_chain(session, finding_id, task_id)
+        spans = trace_mod.load_spans(session, task_id)
+
+    typer.echo(trace_mod.render_trace_text(chain, spans))
+    if export is not None:
+        export.parent.mkdir(parents=True, exist_ok=True)
+        export.write_text(trace_mod.export_trace_json(chain, spans), encoding="utf-8")
+        typer.echo(f"已导出: {export}")
+
+
 def main() -> None:
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and stream.encoding and stream.encoding.lower() not in ("utf-8", "utf8"):

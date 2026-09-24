@@ -102,6 +102,46 @@ def test_cli_review_on_syntax_error_diff(tmp_path, syntax_diff_path):
     assert "语法错误" in report_text
 
 
+def test_cli_trace_command_returns_full_chain(tmp_path, buggy_diff_path):
+    result, db, report_dir = _run(buggy_diff_path, tmp_path)
+    assert result.exit_code == 0, result.output
+    reports = list(report_dir.glob("*/report.md"))
+    assert reports
+    report_text = reports[0].read_text(encoding="utf-8")
+    import re
+
+    m = re.search(r"追溯.*`([0-9a-f]{12})`", report_text)
+    assert m, "报告中应包含 finding 追溯 ID"
+    finding_id = m.group(1)
+
+    trace_result = runner.invoke(
+        app,
+        [
+            "trace",
+            finding_id,
+            "--db",
+            str(db),
+        ],
+    )
+    assert trace_result.exit_code == 0, trace_result.output
+    assert "LLM 调用" in trace_result.output
+    assert "[REDACTED:generic-secret]" in trace_result.output
+    assert "sk-live-9f8e7d6c5b4a3210" not in trace_result.output
+    assert "Spans" in trace_result.output
+
+    export_path = tmp_path / "trace.json"
+    export_result = runner.invoke(
+        app, ["trace", finding_id, "--db", str(db), "--export", str(export_path)]
+    )
+    assert export_result.exit_code == 0, export_result.output
+    import json as _json
+
+    payload = _json.loads(export_path.read_text(encoding="utf-8"))
+    assert payload["finding"]["finding_id"] == finding_id
+    assert len(payload["spans"]) >= 12
+    assert "sk-live-9f8e7d6c5b4a3210" not in export_path.read_text(encoding="utf-8")
+
+
 def test_cli_provider_error_has_clear_status(tmp_path):
     result, db, _ = _run("https://github.com/acme/widgets/pull/not-a-number", tmp_path)
     assert result.exit_code == 1

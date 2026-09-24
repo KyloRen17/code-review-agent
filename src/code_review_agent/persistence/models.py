@@ -76,7 +76,45 @@ class LLMCallRecord(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    finish_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    span_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 脱敏快照
+    user_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)    # 脱敏快照
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)       # 脱敏快照
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ToolResultRecord(Base):
+    __tablename__ = "tool_results"
+    __table_args__ = (UniqueConstraint("task_id", "tool", "work_unit_id", name="uq_tool_result"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), index=True)
+    tool: Mapped[str] = mapped_column(String(64))
+    work_unit_id: Mapped[str] = mapped_column(Text, default="*")
+    status: Mapped[str] = mapped_column(String(16))
+    output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    span_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class SpanRecord(Base):
+    __tablename__ = "spans"
+
+    span_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    trace_id: Mapped[str] = mapped_column(String(64), index=True)
+    parent_span_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))  # node | llm | tool | task
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running | ok | error
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    attributes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON，仅安全标量
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class PublicationRecord(Base):

@@ -3,6 +3,45 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 6 — 评论级 Trace 与可观测性（2026-09-24 完成）
+
+### 完成项
+
+- **span 体系**（`observability/spans.py`）：`SpanRecorder` + contextvar 父子传递。
+  - 节点 span（`node:*`，graph.py 统一包装，含异常捕获与错误状态）；LLM 调用 span（`llm:*`，父=llm_analyze 节点）。
+  - span 表字段对齐常见遥测导出格式（trace_id/span_id/parent/kind/status/耗时/attributes）；
+    attributes 只存安全标量。**说明**：未接入 OpenTelemetry SDK/OTLP（无 collector 场景下收益有限），
+    以自研 SQLite span 存储实现同等语义，JSON 导出结构与之兼容——此为对 plan.md 技术选型的显式替换，理由如上。
+- **LLM 调用脱敏快照**（`llm_calls` 表扩展）：system/user prompt 与模型响应在入库前过 redact()，
+  记录 call_id→span_id、finish_reason、usage、耗时。
+- **工具结果落库**（`tool_results` 表）：tool/unit/status/output/error/耗时/attempts/span_id，幂等 upsert。
+- **追溯链查询**（`observability/trace.py`）：`Comment(finding) → LLM Call（含脱敏 prompt/响应快照）→
+  Work Unit（状态+指纹）→ Task（来源/输入指纹/SHA）` + 工具结果 + 全部 span。
+- **`cra trace <finding_id>`** 命令：文本渲染 + `--export` JSON 导出；finding 跨任务重名时要求 `--task` 指定；
+  导出再过一遍 redact（纵深防御）。报告中每个 finding 增加 `追溯` 行（finding ID + trace 命令提示）。
+- prompt 版本升至 1.1（trigger 字段入 Schema，版本化管理）。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **108 passed**（新增 trace 6 + CLI trace e2e 1） |
+| 链完整性断言 | finding→llm_call（prompt 含 `<diff>` 脱敏快照、响应可解析）→work_unit(done)→task(指纹)；工具含 diff-stat/py-ast-check |
+| span 层级断言 | 10 个节点 span 全 ok；2 个 llm span 父节点均为 node:llm_analyze |
+| 脱敏断言 | prompt/导出 JSON 中 secret 原值不出现（`sk-live-...` grep 计 0），掩码 `[REDACTED:generic-secret]` 在场 |
+| CLI 演示 | `cra trace <id>` 输出完整链；`--export examples/trace_example.json` 12 spans / 3 tools，secret-free |
+| 结构化日志 | 每次 `runs/<task>/log.jsonl`（JSON lines：ts/level/logger/msg + 额外字段） |
+
+### 已知限制 / 说明
+
+- 结构化日志中的 `extra` 字段经过 JSON 序列化，但未做文本级 redact（当前 extra 只放计数/名称类安全标量，代码里已约束）。
+- OTel OTLP 导出器未接入（自研 span 存储替代，见上）。
+- `llm_calls` 表新增列对既有 DB 无迁移（`create_all` 不改表）；开发期删除 `runs/` 重建即可，见 Phase 11 遗留。
+
+### 下一步
+
+- Phase 7：Token/金额预算——单价表加载、调用前成本预留（含并发原子性）、实际用量结算、超限降级与部分报告。
+
 ## Phase 5 — 持久化 Checkpoint 与恢复（2026-09-24 完成）
 
 ### 完成项

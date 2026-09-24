@@ -9,7 +9,7 @@
 | 能力 | 状态 | 位置 |
 |---|---|---|
 | Checkpoint 与异常恢复 | **已实现**（Phase 5） | `checkpoint/`、`persistence/`、`agent/nodes.py` |
-| 评论级 Trace 与可观测 | Phase 6 | `observability/`、`persistence/` |
+| 评论级 Trace 与可观测 | **已实现**（Phase 6） | `observability/`、`persistence/`、`cra trace` |
 | 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
 | Token/金额预算 | Phase 7 | `budget/`、`configs/model_pricing.yaml` |
 | 置信度分级 | 最小版（Phase 1）→ Phase 8（完整） | `review/validator.py` |
@@ -66,6 +66,18 @@ cra resume <task_id>   # task_id 见 review 输出或 runs/cra.sqlite 的 tasks 
 - 崩溃后从 checkpoint 续跑：已完成的工作单元直接跳过，不重复调用模型；
 - 已完成任务中存在失败单元时，`resume` 只重试失败单元；
 - 恢复前重新校验输入（本地 diff 指纹 / PR/MR head SHA）：输入已变化则任务标记 `stale` 并要求新建任务。
+
+## 查询评论级 Trace
+
+每条报告 finding 带 `追溯` 行（finding ID），可查询完整证据链：
+
+```bash
+cra trace <finding_id>                    # 终端查看：LLM 调用、脱敏 prompt/响应快照、工具结果、span 时间线
+cra trace <finding_id> --export out.json  # 导出完整 JSON（导出内容再过一遍脱敏）
+```
+
+追溯链：`Comment → Finding → LLM Call（prompt/响应脱敏快照 + usage）→ Work Unit → Task（指纹/SHA）`，
+外加工具结果与 span 层级。示例见 `examples/trace_example.json`。
 
 ## 接入真实 LLM（可选，已支持）
 

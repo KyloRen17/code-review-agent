@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import FindingRecord, LLMCallRecord, PublicationRecord, WorkUnitRecord
+from .models import (
+    FindingRecord,
+    LLMCallRecord,
+    PublicationRecord,
+    ToolResultRecord,
+    WorkUnitRecord,
+)
 from ..review.finding import Confidence, Finding, Severity
 
 
@@ -77,7 +85,23 @@ def load_findings(session: Session, task_id: str) -> list[Finding]:
     ]
 
 
-def save_llm_call(session: Session, *, call_id: str, task_id: str, unit_id: str | None, model: str, prompt_version: str | None, input_tokens: int, output_tokens: int, duration_ms: int) -> None:
+def save_llm_call(
+    session: Session,
+    *,
+    call_id: str,
+    task_id: str,
+    unit_id: str | None,
+    model: str,
+    prompt_version: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    duration_ms: int,
+    finish_reason: str | None = None,
+    span_id: str | None = None,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    response: str | None = None,
+) -> None:
     record = session.get(LLMCallRecord, call_id)
     if record is not None:
         return  # 幂等：同一 call_id 不重复入账
@@ -91,9 +115,60 @@ def save_llm_call(session: Session, *, call_id: str, task_id: str, unit_id: str 
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             duration_ms=duration_ms,
+            finish_reason=finish_reason,
+            span_id=span_id,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response=response,
         )
     )
     session.commit()
+
+
+def save_tool_result(
+    session: Session,
+    *,
+    task_id: str,
+    tool: str,
+    work_unit_id: str,
+    status: str,
+    output: dict | None,
+    error: str | None,
+    duration_ms: int,
+    attempts: int,
+    span_id: str | None,
+) -> None:
+    record = session.scalar(
+        select(ToolResultRecord).where(
+            ToolResultRecord.task_id == task_id,
+            ToolResultRecord.tool == tool,
+            ToolResultRecord.work_unit_id == work_unit_id,
+        )
+    )
+    if record is None:
+        record = ToolResultRecord(task_id=task_id, tool=tool, work_unit_id=work_unit_id)
+        session.add(record)
+    record.status = status
+    record.output = json.dumps(output, ensure_ascii=False) if output else None
+    record.error = error
+    record.duration_ms = duration_ms
+    record.attempts = attempts
+    record.span_id = span_id
+    session.commit()
+
+
+def load_tool_results(session: Session, task_id: str) -> list[ToolResultRecord]:
+    return list(
+        session.scalars(
+            select(ToolResultRecord)
+            .where(ToolResultRecord.task_id == task_id)
+            .order_by(ToolResultRecord.id)
+        ).all()
+    )
+
+
+def load_llm_call(session: Session, call_id: str) -> LLMCallRecord | None:
+    return session.get(LLMCallRecord, call_id)
 
 
 def load_usage(session: Session, task_id: str) -> dict:

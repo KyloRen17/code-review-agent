@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from langgraph.graph import END, START, StateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
 
 from .nodes import ReviewPipeline
 from .state import GraphState
@@ -20,10 +20,23 @@ _NODE_ORDER = [
 ]
 
 
+def _wrap_with_span(pipeline: ReviewPipeline, name: str):
+    fn = getattr(pipeline, name)
+    recorder = pipeline.recorder
+
+    def wrapped(state: GraphState) -> dict:
+        with recorder.span(
+            state.get("task_id", ""), f"node:{name}", "node", {"node": name}
+        ):
+            return fn(state)
+
+    return wrapped
+
+
 def build_review_graph(pipeline: ReviewPipeline, checkpointer: BaseCheckpointSaver | None = None):
     builder = StateGraph(GraphState)
     for name in _NODE_ORDER:
-        builder.add_node(name, getattr(pipeline, name))
+        builder.add_node(name, _wrap_with_span(pipeline, name))
     builder.add_edge(START, _NODE_ORDER[0])
     for a, b in zip(_NODE_ORDER, _NODE_ORDER[1:]):
         builder.add_edge(a, b)

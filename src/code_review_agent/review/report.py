@@ -32,7 +32,9 @@ def _finding_section(f: Finding) -> str:
         lines.append(f"- **建议**: {f.suggestion}")
     if f.downgrade_reason:
         lines.append(f"- **分级说明**: {f.downgrade_reason}")
-    lines.append(f"- **追溯**: `{f.origin}`（LLM 调用 ID，完整 trace 见 Phase 6）")
+    lines.append(
+        f"- **追溯**: `{f.finding_id}`（`cra trace {f.finding_id}` 查看完整调用链与脱敏快照）"
+    )
     lines.append("")
     return "\n".join(lines)
 

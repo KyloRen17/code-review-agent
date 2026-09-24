@@ -14,6 +14,7 @@ from ..diff.parser import parse_unified_diff
 from ..llm.gateway import LLMGateway, LLMRequest
 from ..llm.prompts import PROMPT_VERSION, build_review_prompt
 from ..llm.schemas import parse_llm_findings
+from ..observability.spans import SpanRecorder, current_span_id
 from ..persistence import ops
 from ..persistence.models import LLMCallRecord
 from ..providers.base import RepositoryProvider
@@ -61,6 +62,7 @@ class ReviewPipeline:
         self.provider = provider
         self.task_id = task_id
         self.session_factory = session_factory
+        self.recorder = SpanRecorder(session_factory)
 
     # ------------------------------------------------------------------
     def load_input(self, state: GraphState) -> dict:
@@ -110,6 +112,21 @@ class ReviewPipeline:
             diff_files=state.get("diff_files", []),
             work_units=state.get("work_units", []),
         )
+        span_id = current_span_id()
+        with self.session_factory() as session:
+            for r in results:
+                ops.save_tool_result(
+                    session,
+                    task_id=state["task_id"],
+                    tool=r.tool,
+                    work_unit_id=r.work_unit_id,
+                    status=r.status.value,
+                    output=r.output,
+                    error=r.error,
+                    duration_ms=r.duration_ms,
+                    attempts=r.attempts,
+                    span_id=span_id,
+                )
         failures = [r for r in results if r.status == ToolStatus.failure]
         if failures:
             logger.warning(
@@ -160,7 +177,13 @@ class ReviewPipeline:
             )
             started = time.monotonic()
             try:
-                response = self.gateway.complete(request)
+                with self.recorder.span(
+                    task_id,
+                    f"llm:{call_id}",
+                    "llm",
+                    {"unit_id": unit.unit_id, "model": self.settings.model.name},
+                ) as span_id:
+                    response = self.gateway.complete(request)
             except Exception as exc:
                 errors.append(f"LLM 调用失败 ({unit.unit_id}): {exc}")
                 self._persist_unit(
@@ -197,6 +220,9 @@ class ReviewPipeline:
                 )
             findings.extend(unit_findings)
             duration_ms = int((time.monotonic() - started) * 1000)
+            redacted_system, _ = redact(request.system)
+            redacted_user, _ = redact(request.prompt)
+            redacted_response, _ = redact(response.content)
             with self.session_factory() as session:
                 ops.save_llm_call(
                     session,
@@ -208,6 +234,11 @@ class ReviewPipeline:
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens,
                     duration_ms=duration_ms,
+                    finish_reason=response.finish,
+                    span_id=span_id,
+                    system_prompt=redacted_system,
+                    user_prompt=redacted_user,
+                    response=redacted_response,
                 )
                 for f in unit_findings:
                     ops.save_finding(session, f)
