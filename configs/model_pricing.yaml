@@ -1,6 +1,11 @@
-# 模型单价表（Phase 7 预算结算使用；mock 模型单价为 0）
+# 模型单价表：预算结算依据（本地估算口径，非服务商精确账单）
+# 未登记的模型会被预算闸门拒绝调用（fail-closed，避免不可控成本）。
 currency: CNY
 models:
   mock-reviewer-v1:
     input_per_1k: 0.0
     output_per_1k: 0.0
+  # 真实模型示例（按你的服务商实际单价填写）：
+  # gpt-4o-mini:
+  #   input_per_1k: 0.0010    # 约 0.0010 元/1k input tokens（按官方定价折算）
+  #   output_per_1k: 0.0030

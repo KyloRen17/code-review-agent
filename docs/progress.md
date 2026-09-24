@@ -3,6 +3,51 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 7 — Token/金额预算（2026-09-24 完成）
+
+### 完成项
+
+- `budget/pricing.py`：单价表（`configs/model_pricing.yaml`）——**未登记模型 fail-closed**（拒绝调用，
+  防止不可控成本）；币种可配置。
+- `budget/ledger.py`：预算账本——journal 逐条记账（reserve/settle/release，含 call_id 归属）
+  + 汇总行（spent/reserved/calls）；**原子预留**（进程内 threading.Lock + SQLite 单写者）。
+- `budget/controller.py`：调用前预留闸门：
+  - 估算口径：输入 token ≈ prompt 字符数 / 4，成本 = 输入估算 + max_output_tokens 按单价折算；
+  - `try_reserve` 不足 → 返回 None，调用方**不得发起付费调用**（该决策为确定性代码，LLM 无权绕过）；
+  - 调用成功 → 按服务商返回的实际 usage **结算**；
+  - usage 不可得（全 0）→ **保守保留预留额**（snapshot 中呈"待结算"），不虚减不虚增；
+  - 调用失败 → release 释放预留。
+- `agent/nodes.py` llm_analyze 集成：每个单元调用前预留；预算不足 → 当前与其后单元标记
+  `skipped(budget)`，**停止后续付费调用**，流水线继续产出部分报告；
+  - 已完成单元的结果与 findings 保留（部分结果语义）；
+  - `resume` 会重试 failed 与 budget-skipped 单元（调高 `--budget` 后续审）。
+- 报告预算行：上限/已结算/预留（待结算）/剩余 + "本地估算口径，非服务商精确账单"声明 + 未审查范围提示。
+- CLI：`--budget <元>` 覆盖（review 与 resume 均可）。
+- 持久化：`budget_entries`（journal）与 `budget_summary`（汇总）两张表，重启可续账。
+
+### 分块与优先级调度说明
+
+大 diff 分块在 Phase 2 已实现（hunk→chunk，字节上限）；本阶段的"优先级"采用 FIFO
+（工作单元顺序即优先级），预算耗尽时按序截断——简单、可预测、与 resume 语义一致。
+基于成本/收益的调度重排留作后续扩展（不影响闸门正确性）。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **118 passed**（新增预算 13：单价表 fail-closed、账本生命周期、限额拒绝、**20 线程并发预留不超额**、控制器估算/结算/无 usage 保守保留、流水线部分报告、预算 0 时网关 0 次调用） |
+| 部分报告场景（单价 100 元/1k、预算 30 元） | 单元 1 完成结算（findings 保留），单元 2 预留被拒 → skipped；报告含预算行与"未审查"提示；`remaining = limit - spent - reserved` 恒等 |
+| CLI 回归 | `review examples/buggy.diff` 报告新增预算行（mock 单价 0） |
+
+### 已知限制
+
+- 并发原子性覆盖进程内（threading.Lock）；跨进程并发预留依赖 SQLite 文件锁，未做分布式账本。
+- 估算口径（字符/4）粗于 tokenizer 精确计数；预留偏保守方向（max_output 全额计入）。
+
+### 下一步
+
+- Phase 8：Finding 验证与置信度分级——工具证据交叉验证、重复合并、复核（预算内）、分级理由可查。
+
 ## Phase 6 — 评论级 Trace 与可观测性（2026-09-24 完成）
 
 ### 完成项

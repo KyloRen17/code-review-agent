@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import AgentSettings
 from ..diff.parser import parse_unified_diff
+from ..budget.controller import BudgetController
+from ..budget.pricing import BudgetError
 from ..llm.gateway import LLMGateway, LLMRequest
 from ..llm.prompts import PROMPT_VERSION, build_review_prompt
 from ..llm.schemas import parse_llm_findings
@@ -54,6 +56,7 @@ class ReviewPipeline:
         provider: RepositoryProvider,
         task_id: str,
         session_factory: sessionmaker[Session],
+        budget: BudgetController | None = None,
     ) -> None:
         self.settings = settings
         self.gateway = gateway
@@ -62,6 +65,7 @@ class ReviewPipeline:
         self.provider = provider
         self.task_id = task_id
         self.session_factory = session_factory
+        self.budget = budget
         self.recorder = SpanRecorder(session_factory)
 
     # ------------------------------------------------------------------
@@ -161,12 +165,45 @@ class ReviewPipeline:
                 }
                 findings.extend(f for f in ops.load_findings(session, task_id) if f.origin in done_calls)
 
+        budget_exhausted = False
         for unit in state.get("work_units", []):
             if unit.unit_id in done_unit_ids:
                 updated.append(unit.model_copy(update={"status": WorkUnitStatus.done}))
                 continue
+            if budget_exhausted:
+                self._persist_unit(
+                    task_id, unit, WorkUnitStatus.skipped, error="预算耗尽，未发起付费调用"
+                )
+                updated.append(unit.model_copy(update={"status": WorkUnitStatus.skipped}))
+                continue
             call_id = uuid.uuid4().hex[:12]
             system, prompt = build_review_prompt(unit)
+            reservation = None
+            if self.budget is not None:
+                try:
+                    reservation = self.budget.try_reserve(
+                        task_id,
+                        call_id,
+                        self.settings.model.name,
+                        len(system) + len(prompt),
+                        self.settings.model.max_output_tokens,
+                    )
+                except BudgetError as exc:
+                    errors.append(f"预算配置错误 ({unit.unit_id}): {exc}")
+                    self._persist_unit(task_id, unit, WorkUnitStatus.failed, error=str(exc))
+                    updated.append(unit.model_copy(update={"status": WorkUnitStatus.failed}))
+                    continue
+                if reservation is None:
+                    budget_exhausted = True
+                    errors.append(
+                        f"预算耗尽（上限 {self.budget.currency} {self.budget.limit:.2f}），"
+                        f"后续 {len(state.get('work_units', [])) - len(updated)} 个单元未审查"
+                    )
+                    self._persist_unit(
+                        task_id, unit, WorkUnitStatus.skipped, error="预算耗尽，未发起付费调用"
+                    )
+                    updated.append(unit.model_copy(update={"status": WorkUnitStatus.skipped}))
+                    continue
             request = LLMRequest(
                 call_id=call_id,
                 model=self.settings.model.name,
@@ -186,6 +223,8 @@ class ReviewPipeline:
                     response = self.gateway.complete(request)
             except Exception as exc:
                 errors.append(f"LLM 调用失败 ({unit.unit_id}): {exc}")
+                if self.budget is not None and reservation is not None:
+                    self.budget.release(task_id, reservation)
                 self._persist_unit(
                     task_id, unit, WorkUnitStatus.failed, error=str(exc)
                 )
@@ -242,6 +281,10 @@ class ReviewPipeline:
                 )
                 for f in unit_findings:
                     ops.save_finding(session, f)
+            if self.budget is not None and reservation is not None:
+                self.budget.settle(
+                    task_id, reservation, response.usage.input_tokens, response.usage.output_tokens
+                )
             self._persist_unit(task_id, unit, WorkUnitStatus.done)
             updated.append(unit.model_copy(update={"status": WorkUnitStatus.done}))
             usage["calls"] += 1
@@ -281,6 +324,7 @@ class ReviewPipeline:
         findings = state.get("validated_findings", [])
         with self.session_factory() as session:
             usage_total = ops.load_usage(session, state["task_id"])
+        budget_snapshot = self.budget.snapshot(state["task_id"]) if self.budget is not None else None
         report_dir = Path(self.settings.storage.report_dir) / state["task_id"]
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "report.md"
@@ -300,6 +344,7 @@ class ReviewPipeline:
             dropped_notes=state.get("dropped_notes", []),
             errors=state.get("errors", []),
             redaction=state.get("redaction"),
+            budget=budget_snapshot,
         )
         report_path.write_text(content, encoding="utf-8")
         logger.info("report_written", extra={"path": str(report_path)})

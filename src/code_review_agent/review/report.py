@@ -56,10 +56,12 @@ def render_markdown(
     dropped_notes: list[str],
     errors: list[str],
     redaction: RedactionReport | None,
+    budget: dict | None = None,
 ) -> str:
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     done = sum(1 for u in work_units if _status_value(u) == "done")
     failed = sum(1 for u in work_units if _status_value(u) == "failed")
+    skipped = sum(1 for u in work_units if _status_value(u) == "skipped")
     high = [f for f in findings if f.confidence == Confidence.high]
     reference = [f for f in findings if f.confidence == Confidence.reference]
 
@@ -71,12 +73,26 @@ def render_markdown(
         out.append(f"- **变更区间**: `{base_sha}` → `{head_sha}`")
     out.append(f"- **生成时间**: {generated_at} (UTC)")
     out.append(f"- **模型**: `{model}`（prompt v{prompt_version}）")
-    out.append(f"- **工作单元**: {len(work_units)} 个，完成 {done}，失败 {failed}")
+    out.append(
+        f"- **工作单元**: {len(work_units)} 个，完成 {done}，失败 {failed}，跳过 {skipped}"
+    )
     out.append(
         f"- **模型用量**: {usage_total.get('calls', 0)} 次调用，"
         f"输入 {usage_total.get('input_tokens', 0)} tokens，输出 {usage_total.get('output_tokens', 0)} tokens"
-        f"（预算闸门将在 Phase 7 启用）"
     )
+    if budget is not None:
+        symbol = "¥" if budget.get("currency", "CNY") == "CNY" else str(budget.get("currency", ""))
+        out.append(
+            f"- **预算**: 上限 {symbol}{budget.get('limit', 0):.2f} | "
+            f"已结算 {symbol}{budget.get('spent', 0):.4f}（{budget.get('settled_calls', 0)} 次调用）| "
+            f"预留中（含待结算）{symbol}{budget.get('reserved', 0):.4f} | "
+            f"剩余 {symbol}{budget.get('remaining', 0):.2f}"
+            "（本地单价表估算口径，非服务商精确账单）"
+        )
+        if skipped:
+            out.append(
+                f"- **注意**: {skipped} 个工作单元因预算不足未审查（调高预算后 `cra resume` 可续审）"
+            )
     if redaction and redaction.matches:
         kinds = ", ".join(f"{k}×{v}" for k, v in redaction.by_kind.items())
         out.append(f"- **脱敏**: 检测并掩码 {redaction.matches} 处疑似 secret（{kinds}）")

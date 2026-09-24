@@ -11,7 +11,7 @@
 | Checkpoint 与异常恢复 | **已实现**（Phase 5） | `checkpoint/`、`persistence/`、`agent/nodes.py` |
 | 评论级 Trace 与可观测 | **已实现**（Phase 6） | `observability/`、`persistence/`、`cra trace` |
 | 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
-| Token/金额预算 | Phase 7 | `budget/`、`configs/model_pricing.yaml` |
+| Token/金额预算 | **已实现**（Phase 7） | `budget/`、`configs/model_pricing.yaml`、`--budget` |
 | 置信度分级 | 最小版（Phase 1）→ Phase 8（完整） | `review/validator.py` |
 | Secret 防护与安全执行 | 最小版（Phase 1）→ Phase 9（完整） | `security/` |
 
@@ -78,6 +78,19 @@ cra trace <finding_id> --export out.json  # 导出完整 JSON（导出内容再�
 
 追溯链：`Comment → Finding → LLM Call（prompt/响应脱敏快照 + usage）→ Work Unit → Task（指纹/SHA）`，
 外加工具结果与 span 层级。示例见 `examples/trace_example.json`。
+
+## 成本预算
+
+```bash
+cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，默认取 configs/agent.yaml）
+```
+
+- 每次模型调用前按单价表估算并**原子预留**，不足则不发起调用（LLM 无法绕过闸门）；
+- 调用后按服务商返回的实际 usage 结算；usage 不可得时保守保留预留额；
+- 预算耗尽 → 停止后续付费调用，产出**部分报告**（明确标注未审查范围）；
+- 调高预算后 `cra resume <task_id>` 续审被跳过的单元；
+- 未在 `configs/model_pricing.yaml` 登记单价的模型会被**拒绝调用**（fail-closed）。
+- 报告中的金额为本地单价表估算口径，非服务商精确账单。
 
 ## 接入真实 LLM（可选，已支持）
 

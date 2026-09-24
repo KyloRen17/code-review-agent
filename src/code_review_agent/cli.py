@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from .agent.graph import build_review_graph
 from .agent.nodes import ReviewPipeline
+from .budget import BudgetController, BudgetLedger, PricingTable
 from .checkpoint import create_checkpointer, has_checkpoint
 from .config import load_settings
 from .llm import build_gateway
@@ -48,6 +49,14 @@ def _load_settings_with_overrides(
     return settings
 
 
+def _build_budget(settings, session_factory) -> BudgetController | None:
+    pricing = PricingTable.load(settings.budget.pricing_file)
+    if pricing is None:
+        return None
+    ledger = BudgetLedger(session_factory, settings.budget.limit, settings.budget.currency)
+    return BudgetController(pricing, ledger)
+
+
 def _execute(
     settings, tools_config: Path, input_ref: str, task_id: str, session_factory, *, fresh: bool
 ):
@@ -62,6 +71,7 @@ def _execute(
         provider=provider,
         task_id=task_id,
         session_factory=session_factory,
+        budget=_build_budget(settings, session_factory),
     )
     checkpointer = create_checkpointer(settings.storage.checkpoint_db)
     graph = build_review_graph(pipeline, checkpointer=checkpointer)
@@ -132,9 +142,12 @@ def review(
     db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
+    budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
 ):
     """审查输入 diff，生成 Markdown 报告。默认 dry-run，不做任何远程写入。"""
     settings = _load_settings_with_overrides(config, db, report_dir, llm)
+    if budget is not None:
+        settings.budget.limit = budget
 
     task_id = uuid.uuid4().hex[:12]
     source = detect_source(input_ref)
@@ -174,9 +187,12 @@ def resume(
     db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
+    budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
 ):
-    """恢复中断/失败的任务：已完成单元跳过，失败单元安全重试。"""
+    """恢复中断/失败的任务：已完成单元跳过，失败/预算跳过单元安全重试。"""
     settings = _load_settings_with_overrides(config, db, report_dir, llm)
+    if budget is not None:
+        settings.budget.limit = budget
     session_factory = _prepare(settings)
 
     with session_factory() as session:
@@ -220,13 +236,13 @@ def resume(
             failed_units = session.scalars(
                 select(WorkUnitRecord).where(
                     WorkUnitRecord.task_id == task_id,
-                    WorkUnitRecord.status == "failed",
+                    WorkUnitRecord.status.in_(["failed", "skipped"]),
                 )
             ).all()
             if not failed_units:
                 typer.echo(f"任务 {task_id} 已完成，报告: {task.report_path}")
                 raise typer.Exit(code=0)
-            typer.echo(f"重试 {len(failed_units)} 个失败工作单元")
+            typer.echo(f"重试 {len(failed_units)} 个失败/跳过工作单元")
         task.status = "running"
         session.commit()
 

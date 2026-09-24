@@ -18,6 +18,7 @@ class ModelConfig(BaseModel):
 class BudgetConfig(BaseModel):
     currency: str = "CNY"
     limit: float = 10.0
+    pricing_file: str = "configs/model_pricing.yaml"
 
 
 class PublishingConfig(BaseModel):

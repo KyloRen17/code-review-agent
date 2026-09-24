@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -115,6 +115,33 @@ class SpanRecord(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     attributes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON，仅安全标量
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class BudgetEntryRecord(Base):
+    __tablename__ = "budget_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), index=True)
+    call_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))  # reserve | settle | release
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class BudgetSummaryRecord(Base):
+    __tablename__ = "budget_summary"
+
+    task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    limit_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    reserved: Mapped[float] = mapped_column(Float, default=0.0)
+    spent: Mapped[float] = mapped_column(Float, default=0.0)
+    reserved_calls: Mapped[int] = mapped_column(Integer, default=0)
+    settled_calls: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class PublicationRecord(Base):
