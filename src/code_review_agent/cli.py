@@ -15,7 +15,7 @@ from .persistence.db import create_db_engine, init_db, make_session_factory
 from .persistence.models import FindingRecord, TaskRecord
 from .providers import build_provider, detect_source
 from .publishers.dry_run import DryRunPublisher
-from .tools.registry import build_registry
+from .tools.dispatcher import build_dispatcher
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="Code Review Agent")
 
@@ -68,12 +68,12 @@ def review(
         session.commit()
 
     gateway = build_gateway(settings)
-    registry = build_registry(tools_config)
+    dispatcher = build_dispatcher(tools_config)
     provider = build_provider(input_ref, settings)
     pipeline = ReviewPipeline(
         settings=settings,
         gateway=gateway,
-        registry=registry,
+        dispatcher=dispatcher,
         publisher=DryRunPublisher(),
         provider=provider,
         task_id=task_id,

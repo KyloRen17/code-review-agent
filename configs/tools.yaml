@@ -1,13 +1,20 @@
-# 声明式工具配置：新增工具 = 实现工具类 + 在此登记，主流程零改动。
-# enabled: false 的工具不会被调度；执行型工具在沙箱就绪前必须保持 disabled。
+# 声明式工具配置：新增工具 = 实现工具类（@install）+ 在此登记，主流程零改动。
+# enabled: false 的工具不会被调度。
+sandbox:
+  enabled: false   # 执行型工具总开关；true 也不会在宿主机执行（Phase 9 提供容器沙箱）
+  runner: none     # none | docker（Phase 9）
+dispatcher:
+  retries: 1       # 工具失败后的重试次数（超时与主动 skipped 不重试）
 tools:
   diff-stat:
     enabled: true
     description: 统计 diff 的文件与行变更数（纯文本计算，不执行任何仓库代码）
-    file_types: ["*"]
     timeout_s: 5
+  py-ast-check:
+    enabled: true
+    description: 对全量新增的 Python 文件做 AST 语法检查（纯文本解析，不执行代码）
+    timeout_s: 10
   typecheck:
-    enabled: false
-    description: 运行类型检查（执行型工具；沙箱就绪前禁用，Phase 4/9 处理）
-    file_types: ["*.py"]
+    enabled: false   # 执行型工具；沙箱未就绪前必须保持 disabled
+    description: 运行 mypy 类型检查（需要沙箱，Phase 9 提供）
     timeout_s: 120

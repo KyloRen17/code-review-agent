@@ -76,7 +76,13 @@ def render_markdown(
         kinds = ", ".join(f"{k}×{v}" for k, v in redaction.by_kind.items())
         out.append(f"- **脱敏**: 检测并掩码 {redaction.matches} 处疑似 secret（{kinds}）")
     for tr in tool_results:
-        out.append(f"- **工具 `{tr.tool}`**: {tr.status.value} — {tr.output or tr.error}")
+        parts = []
+        if tr.output:
+            parts.append(str(tr.output))
+        if tr.error:
+            parts.append(tr.error)
+        detail = "；".join(parts) or "无输出"
+        out.append(f"- **工具 `{tr.tool}`**: {tr.status.value} — {detail}")
     out.append("")
 
     out.append("## 高置信度（可直接采纳）")

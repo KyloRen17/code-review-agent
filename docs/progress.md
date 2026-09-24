@@ -3,6 +3,48 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 4 — 声明式工具系统（2026-09-24 完成）
+
+### 完成项
+
+- `tools/base.py` `BaseReviewTool` 统一接口：名称、描述、scope（task/unit）、适用文件类型
+  （fnmatch）、`requires_execution` 权限标记、超时、输入/输出契约（input_keys/output_keys）、
+  统一 `ToolResult`（含 status/output/error/duration_ms/attempts）。
+- `tools/dispatcher.py` `ToolDispatcher`：
+  - **执行门禁**：`requires_execution=true` 且 sandbox 未启用 → 入口直接拒绝（skipped），LLM/配置都无法绕过；
+  - 文件类型过滤；task 作用域跑一次、unit 作用域按工作单元跑；
+  - 超时（线程池 + future timeout，超时返回 timeout 状态不重试）；
+  - 失败隔离与受控重试（retries 来自 yaml；异常捕获成 failure ToolResult，不影响其他工具/单元）；
+  - 已知限制：线程无法强杀，超时线程可能在后台结束；进程级隔离在 Phase 9 沙箱提供（文档已注明）。
+- `build_dispatcher(tools.yaml)`：声明式装配——enabled 开关、timeout 覆盖、`sandbox.enabled` 总开关、
+  `dispatcher.retries`。新增工具 = `@install` 类 + yaml 一行，主流程零改动（有测试证明）。
+- 新增真实静态工具 `py-ast-check`（unit 作用域）：对**全量新增**的 Python 文件做 AST 语法检查，
+  行号映射精确（含分块偏移）；修改类文件返回 skipped 并说明原因（缺完整内容，AST 不适用）。
+- 示例执行型工具 `typecheck`：注册但默认 disabled；即使误启用，Dispatcher 门禁 + run() 双重拒绝执行，
+  绝不在宿主机跑命令。
+- `configs/tools.yaml` 重构：sandbox/dispatcher/tools 三段式声明。
+- 报告中工具结果渲染 output 与 error 双信息。
+
+### 修复的重要 Bug
+
+- **redactor 误掩码导致代码损坏**：旧 generic-secret 模式把 `token = issue_token(username)`
+  的函数调用误判为 secret，输出 `token = [REDACTED:generic-secret])`（残留右括号），
+  py-ast-check 因此误报语法错误。重写为双模式：带引号值（允许 base64 padding）与
+  裸值（值中排除括号/等号 + 语句边界 lookahead），函数调用与 `== None` 不再误报。
+  该 bug 由 CLI 演示 + AST 工具组合发现，说明工具层交叉验证有效。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **98 passed**（工具系统 11：yaml 装配/新工具零改动接入/执行门禁/失败隔离+重试/超时/unit 文件过滤/AST 真实检出/修改文件跳过；redactor 新增 4 个防误报用例） |
+| CLI `review examples/buggy.diff` | `diff-stat` success；`py-ast-check` success（auth.py）+ skipped（service.py，原因入报告）；findings 仍为 7 条 |
+| CLI `review examples/syntax_error.diff` | AST 工具 failure：第 3 行语法错误（行号精确），流水线完成不中断（e2e 断言） |
+
+### 遗留 / 下一步
+
+- Phase 5：LangGraph 持久化 checkpointer + `resume <task_id>` + 幂等发布 key + commit SHA 校验。
+
 ## Phase 3 — 最小审查闭环（2026-09-24 完成）
 
 ### 完成项

@@ -90,6 +90,18 @@ def test_cli_review_failure_on_missing_input(tmp_path):
         assert "diff 文件不存在" in (task.error or "")
 
 
+def test_cli_review_on_syntax_error_diff(tmp_path, syntax_diff_path):
+    result, db, report_dir = _run(syntax_diff_path, tmp_path)
+    assert result.exit_code == 0, result.output
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        task = session.query(TaskRecord).one()
+        assert task.status == "completed"
+    report_text = report_dir.joinpath(task.id, "report.md").read_text(encoding="utf-8")
+    assert "py-ast-check" in report_text
+    assert "语法错误" in report_text
+
+
 def test_cli_provider_error_has_clear_status(tmp_path):
     result, db, _ = _run("https://github.com/acme/widgets/pull/not-a-number", tmp_path)
     assert result.exit_code == 1

@@ -8,7 +8,7 @@ from code_review_agent.config import load_settings
 from code_review_agent.llm.mock import MockLLMGateway
 from code_review_agent.providers.github import GitHubPRProvider
 from code_review_agent.publishers.dry_run import DryRunPublisher
-from code_review_agent.tools.registry import build_registry
+from code_review_agent.tools.dispatcher import build_dispatcher
 from pathlib import Path
 
 PR_URL = "https://github.com/acme/widgets/pull/42"
@@ -44,7 +44,7 @@ def test_full_pipeline_with_github_mock_provider(tmp_path, agent_config_path, to
     pipeline = ReviewPipeline(
         settings=settings,
         gateway=MockLLMGateway(),
-        registry=build_registry(tools_config_path),
+        dispatcher=build_dispatcher(tools_config_path),
         publisher=DryRunPublisher(),
         provider=GitHubPRProvider(client=client, token="t"),
         task_id="ghmock1",

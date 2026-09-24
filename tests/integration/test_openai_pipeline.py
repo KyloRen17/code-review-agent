@@ -12,7 +12,7 @@ from code_review_agent.config import load_settings
 from code_review_agent.llm.openai_compat import OpenAICompatGateway
 from code_review_agent.providers.local import LocalDiffProvider
 from code_review_agent.publishers.dry_run import DryRunPublisher
-from code_review_agent.tools.registry import build_registry
+from code_review_agent.tools.dispatcher import build_dispatcher
 
 FINDINGS_JSON = {
     "findings": [
@@ -63,7 +63,7 @@ def test_full_pipeline_with_openai_mock_server(tmp_path, agent_config_path, tool
     pipeline = ReviewPipeline(
         settings=settings,
         gateway=gateway,
-        registry=build_registry(tools_config_path),
+        dispatcher=build_dispatcher(tools_config_path),
         publisher=DryRunPublisher(),
         provider=_local_provider(buggy_diff_path),
         task_id="oaimock1",
@@ -100,7 +100,7 @@ def test_invalid_llm_output_fails_unit_but_not_pipeline(tmp_path, agent_config_p
     pipeline = ReviewPipeline(
         settings=settings,
         gateway=gateway,
-        registry=build_registry(tools_config_path),
+        dispatcher=build_dispatcher(tools_config_path),
         publisher=DryRunPublisher(),
         provider=_local_provider(buggy_diff_path),
         task_id="oaimock2",

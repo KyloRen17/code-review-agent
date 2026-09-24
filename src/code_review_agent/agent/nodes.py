@@ -15,8 +15,8 @@ from ..review.finding import Confidence, Finding, Severity
 from ..review.report import render_markdown
 from ..review.validator import validate_and_grade
 from ..security.redactor import redact
-from ..tools.base import ToolResult, ToolStatus
-from ..tools.registry import ToolRegistry
+from ..tools.base import ToolStatus
+from ..tools.dispatcher import ToolDispatcher
 from .state import GraphState
 from .work_units import WorkUnit, WorkUnitStatus, build_work_units
 
@@ -34,14 +34,14 @@ class ReviewPipeline:
         *,
         settings: AgentSettings,
         gateway: LLMGateway,
-        registry: ToolRegistry,
+        dispatcher: ToolDispatcher,
         publisher: ReviewPublisher,
         provider: RepositoryProvider,
         task_id: str,
     ) -> None:
         self.settings = settings
         self.gateway = gateway
-        self.registry = registry
+        self.dispatcher = dispatcher
         self.publisher = publisher
         self.provider = provider
         self.task_id = task_id
@@ -78,25 +78,20 @@ class ReviewPipeline:
         return {"work_units": units, "unit_notes": notes}
 
     def select_tools(self, state: GraphState) -> dict:
-        return {"tool_selection": sorted(self.registry.names())}
+        return {"tool_selection": self.dispatcher.enabled_names()}
 
     def execute_tools(self, state: GraphState) -> dict:
-        results: list[ToolResult] = []
-        for name in state.get("tool_selection", []):
-            tool = self.registry.get(name)
-            if tool is None:
-                results.append(
-                    ToolResult(tool=name, work_unit_id="*", status=ToolStatus.failure, error="工具未注册")
-                )
-                continue
-            try:
-                results.append(
-                    tool.run({"diff_files": state["diff_files"], "work_units": state["work_units"]})
-                )
-            except Exception as exc:
-                results.append(
-                    ToolResult(tool=name, work_unit_id="*", status=ToolStatus.failure, error=str(exc))
-                )
+        results = self.dispatcher.run_all(
+            task_id=state["task_id"],
+            diff_files=state.get("diff_files", []),
+            work_units=state.get("work_units", []),
+        )
+        failures = [r for r in results if r.status == ToolStatus.failure]
+        if failures:
+            logger.warning(
+                "tool_failures",
+                extra={"count": len(failures), "tools": [f.tool for f in failures]},
+            )
         return {"tool_results": results}
 
     def llm_analyze(self, state: GraphState) -> dict:

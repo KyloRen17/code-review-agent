@@ -1,0 +1,10 @@
+diff --git a/broken.py b/broken.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/broken.py
+@@ -0,0 +1,4 @@
++def broken(
++    x = 1
++    return x
++)

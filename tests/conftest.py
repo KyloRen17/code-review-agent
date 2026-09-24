@@ -30,6 +30,11 @@ def clean_diff_path() -> Path:
 
 
 @pytest.fixture
+def syntax_diff_path() -> Path:
+    return EXAMPLES / "syntax_error.diff"
+
+
+@pytest.fixture
 def agent_config_path() -> Path:
     return CONFIGS / "agent.yaml"
 

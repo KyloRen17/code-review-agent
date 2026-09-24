@@ -37,3 +37,32 @@ def test_redaction_preserves_line_count():
     text = 'a = 1\npassword = "super-secret-value"\nb = 2\n'
     out, _ = redact(text)
     assert out.count("\n") == text.count("\n")
+
+
+def test_function_call_value_is_not_masked():
+    text = "        token = issue_token(username)\n"
+    out, report = redact(text)
+    assert out == text
+    assert report.matches == 0
+
+
+def test_none_comparison_is_not_masked():
+    text = "    if password == None:\n        return False\n"
+    out, report = redact(text)
+    assert out == text
+    assert report.matches == 0
+
+
+def test_bare_yaml_secret_is_masked():
+    text = "password: hunter2secret\n"
+    out, report = redact(text)
+    assert "hunter2secret" not in out
+    assert "password: [REDACTED:generic-secret]" in out
+    assert report.by_kind.get("generic-secret") == 1
+
+
+def test_quoted_secret_with_base64_padding_is_masked():
+    text = 'token = "dGVzdDEyMzQ1Njc4OQ=="\n'
+    out, _ = redact(text)
+    assert "dGVzdDEyMzQ1Njc4OQ==" not in out
+    assert 'token = "[REDACTED:generic-secret]"' in out
