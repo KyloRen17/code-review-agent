@@ -3,6 +3,34 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 3 — 最小审查闭环（2026-09-24 完成）
+
+### 完成项
+
+- `llm/openai_compat.py`：真实 LLM 网关（OpenAI 兼容 chat/completions，httpx 直连）。
+  - 凭证只从环境变量读取（默认 `OPENAI_API_KEY`，可配置变量名），缺 key 启动即拒（`llm:no_api_key`），不写入任何文件/日志。
+  - `base_url` 可指向任意兼容服务；`response_format: json_object` 可开关；temperature/max_tokens 可配置。
+  - 错误映射：401/403→auth_failed，429→rate_limited，网络→network，响应结构异常→invalid_response（`LLMError`）。
+- `llm/gateway.py`：`LLMError`（带 kind）；Mock 与 OpenAI 网关实现同一 `LLMGateway` 协议，`build_gateway` 按 `configs/agent.yaml` 的 `model.provider` 构造，CLI 支持 `--llm openai|mock` 覆盖。
+- Finding 模型补齐题目字段：`trigger`（触发条件）进入 `LLMFinding` Schema、`Finding`、报告渲染与 Mock 规则。
+- `examples/expected_findings.md`：演示 diff 的预期结果说明（7 条发现的完整矩阵），e2e 断言其中核心 5 条标题 + 触发条件渲染。
+- Prompt 更新：优先级（缺陷与安全 > 边界与异常 > 有证据的性能）+ trigger 字段入 Schema 说明。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **88 passed**（新增：OpenAI 网关单元 9、OpenAI mock-server 全流水线集成 2、e2e 预期集合强化） |
+| 集成：OpenAI 网关 + MockTransport 接入 graph | 2 个工作单元→2 次调用→usage 记账→finding.origin=call_id→报告生成，全链路通过 |
+| 集成：模型返回非 JSON | 单元标记 failed、errors 记录、报告含"错误"章节、流水线不中断（故障隔离验证） |
+
+真实模型验证状态：**未实测**（本机无 OPENAI_API_KEY）。OpenAI 网关逻辑经 MockTransport 全链路验证；
+具备凭证时运行 `cra review examples/buggy.diff --llm openai` 即可单独验证真实调用。
+
+### 遗留 / 下一步
+
+- Phase 4：BaseReviewTool 完整接口（输入/输出 Schema、适用文件类型、超时与资源约束）、Tool Dispatcher、工具失败隔离与重试控制、typecheck 示例（默认 disabled）。
+
 ## Phase 2 — 三种输入与 Diff 归一化（2026-09-24 完成）
 
 ### 完成项

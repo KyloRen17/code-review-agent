@@ -116,6 +116,7 @@ class ReviewPipeline:
                 system=system,
                 prompt=prompt,
                 context={"file": unit.file, "code": unit.content, "new_start": unit.start_line},
+                max_output_tokens=self.settings.model.max_output_tokens,
             )
             try:
                 response = self.gateway.complete(request)
@@ -138,6 +139,7 @@ class ReviewPipeline:
                         line=lf.line,
                         title=lf.title,
                         description=lf.description,
+                        trigger=lf.trigger,
                         evidence=lf.evidence,
                         suggestion=lf.suggestion,
                         severity=Severity(lf.severity),

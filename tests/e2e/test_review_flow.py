@@ -53,6 +53,16 @@ def test_cli_review_on_buggy_diff_end_to_end(tmp_path, buggy_diff_path):
     report_text = report_dir.joinpath(task.id, "report.md").read_text(encoding="utf-8")
     assert "高置信度（可直接采纳）" in report_text
     assert "使用 eval() 执行动态表达式" in report_text
+    expected_titles = {
+        "subprocess 使用 shell=True",
+        "使用 eval() 执行动态表达式",
+        "疑似硬编码凭证",
+        "异常被静默吞掉",
+        "可变默认参数",
+    }
+    actual_titles = {r.title for r in rows}
+    assert expected_titles <= actual_titles
+    assert "触发条件" in report_text
     assert "sk-live-9f8e7d6c5b4a3210" not in report_text
     assert "[REDACTED:generic-secret]" in report_text
     assert "**工具 `diff-stat`**: success" in report_text

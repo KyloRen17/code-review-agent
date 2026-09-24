@@ -23,6 +23,8 @@ def _finding_section(f: Finding) -> str:
     if f.evidence:
         lines.append(f"- **证据**:\n  ```\n  {f.evidence}\n  ```")
     lines.append(f"- **说明**: {f.description}")
+    if f.trigger:
+        lines.append(f"- **触发条件**: {f.trigger}")
     if f.suggestion:
         lines.append(f"- **建议**: {f.suggestion}")
     if f.downgrade_reason:

@@ -15,6 +15,7 @@ class LLMFinding(BaseModel):
     confidence: Literal["high", "reference"]
     evidence: str = ""
     description: str
+    trigger: str | None = None
     suggestion: str | None = None
 
 

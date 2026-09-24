@@ -25,6 +25,7 @@ class Finding(BaseModel):
     line: int | None = Field(default=None, ge=1)
     title: str
     description: str
+    trigger: str | None = None
     evidence: str = ""
     suggestion: str | None = None
     severity: Severity = Severity.info

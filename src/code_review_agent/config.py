@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 class ModelConfig(BaseModel):
     provider: str = "mock"
     name: str = "mock-reviewer-v1"
+    base_url: str | None = None
+    api_key_env: str = "OPENAI_API_KEY"
+    temperature: float = 0.2
+    max_output_tokens: int = 2048
 
 
 class BudgetConfig(BaseModel):

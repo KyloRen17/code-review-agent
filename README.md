@@ -55,7 +55,18 @@ cra review https://gitlab.com/group/project/-/merge_requests/45  # GitLab MR（�
 - `runs/<task_id>/log.jsonl` — 结构化执行日志
 - `runs/cra.sqlite` — 任务与 findings 记录
 
-远程 LLM、GitHub/GitLab 输入与发布、预算闸门在后续 Phase 接入（见 `docs/progress.md`）。
+GitHub/GitLab 发布、预算闸门在后续 Phase 接入（见 `docs/progress.md`）。
+
+## 接入真实 LLM（可选，已支持）
+
+```bash
+export OPENAI_API_KEY=sk-...                        # 任意 OpenAI 兼容服务
+export OPENAI_BASE_URL=https://api.openai.com/v1    # 可选，默认官方
+cra review examples/buggy.diff --llm openai
+```
+
+也可在 `configs/agent.yaml` 把 `model.provider` 改为 `openai` 并填写 `name`/`base_url`。
+凭证只从环境变量读取，绝不写入配置、日志或报告；网关逻辑经 Mock 服务全链路验证，真实平台调用未实测。
 
 ## 测试
 

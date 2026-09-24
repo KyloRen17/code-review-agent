@@ -34,6 +34,7 @@ def review(
     tools_config: Path = typer.Option(Path("configs/tools.yaml"), "--tools", help="工具声明配置"),
     db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
+    llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
 ):
     """审查输入 diff，生成 Markdown 报告。默认 dry-run，不做任何远程写入。"""
     settings = load_settings(config)
@@ -41,6 +42,8 @@ def review(
         settings.storage.db = str(db)
     if report_dir is not None:
         settings.storage.report_dir = str(report_dir)
+    if llm is not None:
+        settings.model.provider = llm
 
     task_id = uuid.uuid4().hex[:12]
     source = detect_source(input_ref)

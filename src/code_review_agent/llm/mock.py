@@ -17,6 +17,7 @@ class _Rule:
     confidence: str
     description: str
     suggestion: str
+    trigger: str | None = None
 
 
 _RULES = [
@@ -28,6 +29,7 @@ _RULES = [
         confidence="high",
         description="eval 会执行任意代码，存在命令注入与数据泄露风险。",
         suggestion="改用 ast.literal_eval 或显式解析输入。",
+        trigger="expr 来源于外部输入或字符串拼接。",
     ),
     _Rule(
         rule_id="subprocess-shell-true",
@@ -37,6 +39,7 @@ _RULES = [
         confidence="high",
         description="shell=True 与外部输入拼接时可被注入任意 shell 命令。",
         suggestion="移除 shell=True，使用参数列表形式调用。",
+        trigger="cmd 参数包含外部可控内容时。",
     ),
     _Rule(
         rule_id="hardcoded-secret",
@@ -46,6 +49,7 @@ _RULES = [
         confidence="high",
         description="凭证硬编码在源码中，会随仓库历史泄露。",
         suggestion="从环境变量或密钥管理服务读取。",
+        trigger="仓库被克隆或历史泄露即触发（无条件）。",
     ),
     _Rule(
         rule_id="swallowed-exception",
@@ -55,6 +59,7 @@ _RULES = [
         confidence="reference",
         description="空 except/pass 会掩盖真实故障，排障困难。",
         suggestion="记录日志或至少向上抛出。",
+        trigger="被捕获的代码路径抛出异常时。",
     ),
     _Rule(
         rule_id="mutable-default-arg",
@@ -64,6 +69,7 @@ _RULES = [
         confidence="reference",
         description="可变默认参数在多次调用间共享状态。",
         suggestion="默认值设为 None，在函数体内初始化。",
+        trigger="多次调用且未显式传入该参数时。",
     ),
     _Rule(
         rule_id="none-equality",
@@ -73,6 +79,7 @@ _RULES = [
         confidence="reference",
         description="PEP 8 规定与 None 比较应使用身份运算符。",
         suggestion="改为 is None / is not None。",
+        trigger="操作数重载 __eq__ 时行为可能异常。",
     ),
 ]
 
@@ -124,6 +131,7 @@ class MockLLMGateway:
                                 confidence=rule.confidence,  # type: ignore[arg-type]
                                 evidence=content.strip(),
                                 description=rule.description,
+                                trigger=rule.trigger,
                                 suggestion=rule.suggestion,
                             )
                         )
@@ -137,6 +145,7 @@ class MockLLMGateway:
                             confidence="reference",
                             evidence=f"{prev_content.strip()} / pass",
                             description="空 except/pass 会掩盖真实故障，排障困难。",
+                            trigger="被捕获的代码路径抛出异常时。",
                             suggestion="记录日志或至少向上抛出。",
                         )
                     )
