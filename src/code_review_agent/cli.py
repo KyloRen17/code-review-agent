@@ -11,7 +11,7 @@ from .agent.graph import build_review_graph
 from .agent.nodes import ReviewPipeline
 from .budget import BudgetController, BudgetLedger, PricingTable
 from .checkpoint import create_checkpointer, has_checkpoint
-from .config import load_settings
+from .config import load_env_file, load_settings
 from .llm import build_gateway
 from .observability.logging import setup_logging
 from .persistence import ops
@@ -307,6 +307,10 @@ def trace(
 
 
 def main() -> None:
+    # 本地便利：若当前目录存在 .env 则自动加载（真实环境变量优先；值不落任何日志/报告）
+    env_loaded = load_env_file()
+    if env_loaded:
+        typer.echo(f".env: 已加载 {env_loaded} 个变量（不覆盖已设置的环境变量）", err=True)
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and stream.encoding and stream.encoding.lower() not in ("utf-8", "utf8"):
             try:

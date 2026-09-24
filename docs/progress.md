@@ -3,6 +3,26 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## 变更记录 — .env 自动加载（2026-09-24，交付后增强，分支 feat/env-auto-load）
+
+### 完成项
+
+- 动机：CLI 只读 `os.environ`，把凭证写进 `.env` 却不生效是易踩的坑。
+- `config.load_env_file()`：零依赖解析器（KEY=VALUE、`export ` 前缀、`#` 注释、成对单/双引号）；
+  **不覆盖已存在的真实环境变量**（显式设置优先）；值只进入 `os.environ`，函数仅返回计数，
+  不落日志/报告/DB。设计决策：不引入 python-dotenv（~30 行自实现即可满足需求，
+  且"值永不落任何输出"的约束可控可测）。
+- `cli.main()` 启动时加载当前目录 `.env`，成功时 stderr 提示一行（仅计数，无值）。
+- 新增 `tests/unit/test_env_loader.py`（6 用例）；`.env.example`、README、`docs/security.md` 同步更新。
+- 此变更经分支 + PR 交付，作为 code-review-agent 对自身 PR 的自测样本。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/` | **157 passed**（151 原有 + 6 新增） |
+| CLI e2e：`python -m code_review_agent.cli --help`（仓含真实 .env） | stderr 输出 `.env: 已加载 3 个变量（不覆盖…）`，仅计数无值，help 正常 |
+
 ## Phase 11 — 最终测试、文档与打包（2026-09-24 完成）
 
 ### 完成项

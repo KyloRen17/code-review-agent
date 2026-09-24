@@ -127,7 +127,7 @@ cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，
 ## 接入真实 LLM（可选，已支持）
 
 ```bash
-export OPENAI_API_KEY=sk-...                        # 任意 OpenAI 兼容服务
+export OPENAI_API_KEY=sk-...                        # 任意 OpenAI 兼容服务；也可写入 .env（启动时自动加载）
 export OPENAI_BASE_URL=https://api.openai.com/v1    # 可选，默认官方
 cra review examples/buggy.diff --llm openai
 ```
@@ -148,4 +148,5 @@ scripts/run_tests.sh
 - `configs/agent.yaml` — 模型、预算、发布模式、存储与输入限制
 - `configs/tools.yaml` — 声明式工具注册（新增工具不改主流程）
 - `configs/model_pricing.yaml` — 模型单价表（预算结算用）
-- `.env.example` — 凭证模板；真实凭证只从环境变量读取，绝不入库
+- `.env.example` — 凭证模板；复制为 `.env` 后 CLI 启动时自动加载（KEY=VALUE，
+  真实环境变量优先、不被覆盖；`.env` 已在 `.gitignore`，值绝不写日志/报告/DB）

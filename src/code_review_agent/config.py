@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -62,3 +63,37 @@ def load_settings(path: Path | str | None = None) -> AgentSettings:
         raise FileNotFoundError(f"配置文件不存在: {p}")
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     return AgentSettings.model_validate(data)
+
+
+def load_env_file(path: str | Path | None = None) -> int:
+    """从 .env 文件加载环境变量（本地开发便利，不引入 dotenv 依赖）。
+
+    约束（与安全设计一致）：
+    - 仅解析 KEY=VALUE 行（支持 export 前缀、# 注释、成对单/双引号）；
+    - 不覆盖已存在的真实环境变量（显式设置永远优先）；
+    - 值只进入 os.environ，绝不写入日志、报告或数据库（返回值仅为计数）；
+    - 文件不存在或行格式非法时静默跳过，返回实际加载的变量个数。
+    """
+    p = Path(path) if path is not None else Path(".env")
+    if not p.is_file():
+        return 0
+    loaded = 0
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if not key or not value:
+            continue
+        if key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
