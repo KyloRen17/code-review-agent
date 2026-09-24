@@ -1,0 +1,18 @@
+model:
+  provider: mock          # mock | openai（openai 将在 Phase 3 接入）
+  name: mock-reviewer-v1
+
+budget:
+  currency: CNY
+  limit: 10.0             # 单个 MR/PR 的预算上限；预算闸门在 Phase 7 启用
+
+publishing:
+  mode: dry_run           # dry_run | github | gitlab；远程写入需显式 --publish（Phase 10）
+
+storage:
+  db: runs/cra.sqlite
+  report_dir: runs
+
+limits:
+  max_diff_bytes: 5242880     # 5 MiB，超过则拒绝处理（Phase 2 提供更精细的分块策略）
+  max_work_unit_bytes: 65536  # 单个工作单元（hunk）超过此大小则跳过并记录

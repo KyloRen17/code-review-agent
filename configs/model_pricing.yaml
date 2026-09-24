@@ -1,0 +1,6 @@
+# 模型单价表（Phase 7 预算结算使用；mock 模型单价为 0）
+currency: CNY
+models:
+  mock-reviewer-v1:
+    input_per_1k: 0.0
+    output_per_1k: 0.0

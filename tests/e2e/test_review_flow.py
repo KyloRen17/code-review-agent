@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+from typer.testing import CliRunner
+
+from code_review_agent.cli import app
+from code_review_agent.persistence.db import create_db_engine, make_session_factory
+from code_review_agent.persistence.models import FindingRecord, TaskRecord
+
+runner = CliRunner()
+
+
+def _run(input_ref, tmp_path, extra=()):
+    db = tmp_path / "db.sqlite"
+    report_dir = tmp_path / "runs"
+    args = [
+        "review",
+        str(input_ref),
+        "--config",
+        str(_configs() / "agent.yaml"),
+        "--tools",
+        str(_configs() / "tools.yaml"),
+        "--db",
+        str(db),
+        "--report-dir",
+        str(report_dir),
+        *extra,
+    ]
+    result = runner.invoke(app, args)
+    return result, db, report_dir
+
+
+def _configs():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parents[2] / "configs"
+
+
+def test_cli_review_on_buggy_diff_end_to_end(tmp_path, buggy_diff_path):
+    result, db, report_dir = _run(buggy_diff_path, tmp_path)
+    assert result.exit_code == 0, result.output
+    assert "任务" in result.output
+    assert "高置信 3" in result.output
+
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        task = session.query(TaskRecord).one()
+        assert task.status == "completed"
+        assert task.report_path and task.report_path.endswith("report.md")
+        rows = session.query(FindingRecord).filter(FindingRecord.task_id == task.id).all()
+        assert len(rows) == 7
+        assert sum(1 for r in rows if r.confidence == "high") == 3
+
+    report_text = report_dir.joinpath(task.id, "report.md").read_text(encoding="utf-8")
+    assert "高置信度（可直接采纳）" in report_text
+    assert "使用 eval() 执行动态表达式" in report_text
+    assert "sk-live-9f8e7d6c5b4a3210" not in report_text
+    assert "[REDACTED:generic-secret]" in report_text
+    assert "**工具 `diff-stat`**: success" in report_text
+
+
+def test_cli_review_on_clean_diff_reports_no_findings(tmp_path, clean_diff_path):
+    result, db, report_dir = _run(clean_diff_path, tmp_path)
+    assert result.exit_code == 0, result.output
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        task = session.query(TaskRecord).one()
+        assert task.status == "completed"
+        assert session.query(FindingRecord).count() == 0
+    report_text = report_dir.joinpath(task.id, "report.md").read_text(encoding="utf-8")
+    assert "未发现可确认问题" in report_text
+
+
+def test_cli_review_failure_on_missing_input(tmp_path):
+    result, db, _ = _run(tmp_path / "no-such.diff", tmp_path)
+    assert result.exit_code == 1
+    engine = create_db_engine(db)
+    with make_session_factory(engine)() as session:
+        task = session.query(TaskRecord).one()
+        assert task.status == "failed"
+        assert "diff 文件不存在" in (task.error or "")

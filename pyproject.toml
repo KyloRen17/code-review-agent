@@ -1,0 +1,32 @@
+[project]
+name = "code-review-agent"
+version = "0.1.0"
+description = "Recoverable, observable, extensible code review agent with budget control, confidence grading and security guardrails."
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "langgraph>=0.2.60",
+    "pydantic>=2.7",
+    "sqlalchemy>=2.0.30",
+    "typer>=0.12",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+]
+
+[project.scripts]
+cra = "code_review_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_review_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

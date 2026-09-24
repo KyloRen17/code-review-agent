@@ -1,0 +1,41 @@
+diff --git a/app/auth.py b/app/auth.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/app/auth.py
+@@ -0,0 +1,19 @@
++import subprocess
++
++API_TOKEN = "sk-live-9f8e7d6c5b4a3210"
++
++def run_command(cmd):
++    result = subprocess.run(cmd, shell=True)
++    return result.stdout
++
++def authenticate(username, password):
++    if password == None:
++        return False
++    try:
++        token = issue_token(username)
++    except Exception:
++        pass
++    return True
++
++def unsafe_eval(expr):
++    return eval(expr)
+diff --git a/service.py b/service.py
+index 2222222..3333333 100644
+--- a/service.py
++++ b/service.py
+@@ -12,5 +12,10 @@
+     data = request.json
+     if data is None:
+         raise ValueError("empty")
+-    user = data["user"]
++    user = data.get("user")
++    cache = {}
++    def defaults(arg, value={}):
++        return value
++    if user == None:
++        user = "anonymous"
+     return user
