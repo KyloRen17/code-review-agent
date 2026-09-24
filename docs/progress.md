@@ -3,6 +3,41 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## 变更记录 — 真实 LLM 已实测 + `--model` 参数（2026-09-24，分支 feat/env-auto-load）
+
+### 完成项
+
+- CLI `--model` 选项（review 与 resume）：覆盖 `settings.model.name`，与 `--llm openai` 组合可
+  不改配置临时换模型；仓库默认仍为 mock（保持无 Key 可演示，现有测试不变）。
+- `configs/model_pricing.yaml` 登记 `qwen3.8-flash`（保守示例单价，可按实际调整）。
+- `configs/agent.yaml` 注释更新为真实模型使用指引（--llm/--model、环境变量、单价登记要求）。
+- **真实 LLM 全链路首次实测通过**（此前一直标注"未实测"）：OPENAI_API_KEY/OPENAI_BASE_URL
+  经 `.env` 自动加载，qwen3.8-flash 经 OpenAI 兼容网关完成审查。
+
+### 实际执行的验证（真实调用）
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/` | **159 passed**（157 + 新增 2 个覆盖测试） |
+| `cra review examples/buggy.diff --llm openai --model qwen3.8-flash --db runs/real/...` | **成功**：2 工作单元全 done，6 findings（高置信 4 / 参考 2），exit 0 |
+| 调用账目（DB 与报告一致） | **6 次调用，输入 2096 / 输出 10050 tokens；已结算 ¥0.0322（预算 ¥10）；预留归零** |
+| `cra trace <id> --export` | 链完整（call/span/prompt v1.1/真实响应快照/16 spans）；导出 JSON 中 **secret 原值 0 命中** |
+| 置信度分级（真实模型） | 模型自报 high 但证据无法逐字对回 diff 的 2 条被确定性规则**降级为参考**；4 条高置信全部复核 confirmed |
+
+### 真实模型 vs Mock 的观察（有价值的差异）
+
+- qwen3.8-flash 发现了 Mock 规则未覆盖的**逻辑缺陷**：`except: pass` 后无条件 `return True`
+  导致认证绕过（buggy.diff 预期矩阵之外的发现）；另指出 `shell=True` 场景 `result.stdout`
+  为 None 的次生问题。
+- 真实模型的"证据"多为改写/节选，无法逐字对回 diff → 被分级器降级，印证"LLM 自评
+  confidence 只是输入信号"的设计。
+- 6 次调用含 4 次复核（上限 5 内），复核理由为模型独立推理文本，已入报告与 trace。
+
+### 单价说明（诚实口径）
+
+`model_pricing.yaml` 中 qwen3.8-flash 为**保守示例单价**，预算金额为本地估算口径，
+实际成本以服务商账单为准。
+
 ## 变更记录 — .env 自动加载（2026-09-24，交付后增强，分支 feat/env-auto-load）
 
 ### 完成项

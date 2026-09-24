@@ -5,6 +5,9 @@ models:
   mock-reviewer-v1:
     input_per_1k: 0.0
     output_per_1k: 0.0
+  qwen3.8-flash:
+    input_per_1k: 0.001    # 保守示例值（预算估算口径），请按你的服务商实际单价调整
+    output_per_1k: 0.003
   # 真实模型示例（按你的服务商实际单价填写）：
   # gpt-4o-mini:
   #   input_per_1k: 0.0010    # 约 0.0010 元/1k input tokens（按官方定价折算）

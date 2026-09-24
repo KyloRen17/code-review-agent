@@ -37,7 +37,7 @@ def _prepare(settings):
 
 
 def _load_settings_with_overrides(
-    config: Path, db: Path | None, report_dir: Path | None, llm: str | None
+    config: Path, db: Path | None, report_dir: Path | None, llm: str | None, model: str | None
 ):
     settings = load_settings(config)
     if db is not None:
@@ -46,6 +46,8 @@ def _load_settings_with_overrides(
         settings.storage.report_dir = str(report_dir)
     if llm is not None:
         settings.model.provider = llm
+    if model is not None:
+        settings.model.name = model
     return settings
 
 
@@ -143,11 +145,12 @@ def review(
     db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
+    model: str = typer.Option(None, "--model", help="覆盖模型 ID（须在 configs/model_pricing.yaml 登记单价）"),
     budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
     publish: bool = typer.Option(False, "--publish", help="显式授权发布行级评论到 PR/MR（默认 dry-run）"),
 ):
     """审查输入 diff，生成 Markdown 报告。默认 dry-run，不做任何远程写入。"""
-    settings = _load_settings_with_overrides(config, db, report_dir, llm)
+    settings = _load_settings_with_overrides(config, db, report_dir, llm, model)
     if budget is not None:
         settings.budget.limit = budget
 
@@ -195,11 +198,12 @@ def resume(
     db: Path = typer.Option(None, "--db", help="覆盖 SQLite 数据库路径"),
     report_dir: Path = typer.Option(None, "--report-dir", help="覆盖报告输出目录"),
     llm: str = typer.Option(None, "--llm", help="覆盖模型 provider（mock | openai）"),
+    model: str = typer.Option(None, "--model", help="覆盖模型 ID（须在 configs/model_pricing.yaml 登记单价）"),
     budget: float = typer.Option(None, "--budget", help="覆盖单任务预算上限（元）"),
     publish: bool = typer.Option(False, "--publish", help="显式授权发布行级评论到 PR/MR（默认 dry-run）"),
 ):
     """恢复中断/失败的任务：已完成单元跳过，失败/预算跳过单元安全重试。"""
-    settings = _load_settings_with_overrides(config, db, report_dir, llm)
+    settings = _load_settings_with_overrides(config, db, report_dir, llm, model)
     if budget is not None:
         settings.budget.limit = budget
     session_factory = _prepare(settings)

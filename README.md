@@ -124,16 +124,25 @@ cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，
 - **默认不发布**：默认 dry-run；对 GitHub PR / GitLab MR 加 `--publish` 显式授权后发布行级评论
   （发布前校验 head SHA、只贴能定位到新增行的 findings、锚点幂等去重）。
 
-## 接入真实 LLM（可选，已支持）
+## 接入真实 LLM（可选，已实测）
 
 ```bash
 export OPENAI_API_KEY=sk-...                        # 任意 OpenAI 兼容服务；也可写入 .env（启动时自动加载）
 export OPENAI_BASE_URL=https://api.openai.com/v1    # 可选，默认官方
-cra review examples/buggy.diff --llm openai
+cra review examples/buggy.diff --llm openai --model qwen3.8-flash
 ```
 
-也可在 `configs/agent.yaml` 把 `model.provider` 改为 `openai` 并填写 `name`/`base_url`。
-凭证只从环境变量读取，绝不写入配置、日志或报告；网关逻辑经 Mock 服务全链路验证，真实平台调用未实测。
+`--model` 指定模型 ID（该模型**必须在 `configs/model_pricing.yaml` 登记单价**，否则预算闸门
+fail-closed 拒绝调用）；也可在 `configs/agent.yaml` 把 `model.provider` 改为 `openai` 并填写 `name`
+（仓库默认保持 mock，无 Key 也能演示）。
+凭证只从环境变量读取，绝不写入配置、日志或报告。真实 LLM 调用**已实测**
+（qwen3.8-flash：6 次调用、预算结算 ¥0.0322、trace 脱敏 0 泄露，证据见 `docs/progress.md`）。
+
+用真实模型审查 GitHub PR：
+
+```bash
+cra review https://github.com/owner/repo/pull/123 --llm openai --model qwen3.8-flash
+```
 
 ## 测试
 

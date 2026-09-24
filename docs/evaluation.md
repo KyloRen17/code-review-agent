@@ -24,11 +24,11 @@
 | 置信度 | `pytest tests/unit/test_validator.py tests/unit/test_recheck.py` | 无效行号/证据不匹配/复核驳回不进高置信 |
 | 安全 | `pytest tests/security/` 或 demo 第 5/6 步 | secret 不出域；注入不改控制流；默认无远程写入 |
 
-## 真实集成验证条件（当前未验证）
+## 真实集成验证状态
 
-| 项 | 条件 | 命令 |
+| 项 | 状态 | 命令 |
 |---|---|---|
-| 真实 LLM | `OPENAI_API_KEY`（任意 OpenAI 兼容服务） | `cra review examples/buggy.diff --llm openai` |
+| 真实 LLM | **已验证**（2026-09-24，qwen3.8-flash：6 次调用、已结算 ¥0.0322、trace 脱敏 0 泄露，证据见 progress.md） | `cra review examples/buggy.diff --llm openai --model qwen3.8-flash` |
 | GitHub 真实读取 | `GITHUB_TOKEN` + 可访问 PR | `cra review https://github.com/o/r/pull/N` |
 | GitHub 真实发布 | 测试仓库 + 授权 | `cra review ... --publish`（重复执行验证幂等） |
 | GitLab 同理 | `GITLAB_TOKEN` | 同上（MR 链接） |

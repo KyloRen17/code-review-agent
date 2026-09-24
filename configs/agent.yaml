@@ -1,13 +1,14 @@
 model:
-  provider: mock          # mock | openai
-  name: mock-reviewer-v1
+  provider: mock          # mock | openai；单次运行可用 CLI --llm openai 覆盖（默认保持无 Key 可演示）
+  name: mock-reviewer-v1  # 默认 Mock；真实运行用 CLI --model <模型ID> 覆盖，如 --model qwen3.8-flash
   temperature: 0.2
   max_output_tokens: 2048
-  # 真实模型示例（凭证只从环境变量读取，绝不写入本文件）：
-  # provider: openai
-  # name: gpt-4o-mini
-  # base_url: https://api.openai.com/v1    # 任意 OpenAI 兼容服务
-  # api_key_env: OPENAI_API_KEY
+  # 真实模型（凭证只从环境变量/本地 .env 读取，绝不写入本文件）：
+  #   OPENAI_API_KEY（必需）、OPENAI_BASE_URL（可选，默认官方；已设则无需 base_url）
+  #   运行示例：cra review <diff或PR链接> --llm openai --model qwen3.8-flash
+  #   模型单价必须在 configs/model_pricing.yaml 登记，否则预算闸门拒绝调用（fail-closed）
+  # base_url: https://api.openai.com/v1    # 仅当不想用 OPENAI_BASE_URL 环境变量时才写
+  # api_key_env: OPENAI_API_KEY            # 仅当使用非默认变量名时才需要
 
 budget:
   currency: CNY

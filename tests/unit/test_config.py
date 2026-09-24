@@ -25,3 +25,23 @@ def test_missing_config_file_raises(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         load_settings(tmp_path / "nope.yaml")
+
+
+def test_load_settings_with_overrides(tmp_path, agent_config_path):
+    from code_review_agent.cli import _load_settings_with_overrides
+
+    settings = _load_settings_with_overrides(
+        agent_config_path, tmp_path / "db.sqlite", tmp_path / "runs", "openai", "qwen3.8-flash"
+    )
+    assert settings.model.provider == "openai"
+    assert settings.model.name == "qwen3.8-flash"
+    assert settings.storage.db == str(tmp_path / "db.sqlite")
+    assert settings.storage.report_dir == str(tmp_path / "runs")
+
+
+def test_load_settings_overrides_keep_defaults_when_none(agent_config_path):
+    from code_review_agent.cli import _load_settings_with_overrides
+
+    settings = _load_settings_with_overrides(agent_config_path, None, None, None, None)
+    assert settings.model.provider == "mock"
+    assert settings.model.name == "mock-reviewer-v1"
