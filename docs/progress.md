@@ -3,6 +3,45 @@
 > 每阶段记录：完成项、实际执行的验证命令与结果、遗留问题。
 > 未执行的测试不得标注"通过"；依赖外部凭证未实测的功能一律标注"未实测"。
 
+## Phase 9 — 安全边界（2026-09-24 完成）
+
+### 完成项
+
+- **fail-closed 输入检查**：`security.assert_safe_text`——NUL 字节或不可打印控制字符 → 拒绝处理；
+  LocalDiffProvider 改严格 UTF-8 解码（解码失败即 ProviderError）。
+- **脱敏全覆盖**（此前 diff 已覆盖，补齐其余出口）：
+  - 工具输出：execute_tools 持久化前对序列化 output/error 过 redact；
+  - 模型回显：finding.evidence（来自模型响应）入库前再脱敏；
+  - 外发 trace：导出 JSON 二次脱敏（Phase 6 已有）；日志 extra 仅安全标量（约束在代码）；
+  - PR/MR 描述：设计上不进入 prompt（ReviewInput.description 仅供人读）。
+- **沙箱执行**（`tools/sandbox.py`）：DockerSandboxRunner——`--network none`、`--read-only`、
+  `--cap-drop ALL`、`no-new-privileges`、内存/CPU/PID 上限、临时目录只读挂载（文件名取 basename 防穿越）、
+  `--stop-timeout` 进程级强杀、不挂载任何宿主凭证；docker 不可用 → `available=False` →
+  执行型工具自动禁用（fail-closed to disabled）。FakeSandboxRunner 供确定性测试。
+- **typecheck 真实沙箱执行**（unit 作用域）：沙箱可用时对全量新增文件跑容器内纯 `compile()`
+  （不 import、不执行被审代码逻辑）；命令固定、无 shell 拼接，diff/模型内容无法注入命令。
+  沙箱不可用时 Dispatcher 入口 + run() 双重拒绝。
+- **Prompt Injection 边界**：控制流层面，工具选择/沙箱开关/脱敏全部由确定性代码决策，
+  diff 与模型输出只是数据；prompt 中显式声明 `<diff>` 为被审数据。
+
+### 实际执行的验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/Scripts/python -m pytest tests/` | **140 passed**（新增 security/adversarial 9） |
+| 对抗测试 | ①注入指令 diff（要求启用 typecheck/执行 rm -rf/跳过脱敏）→ 工具集不变、脱敏照常、findings 仍只来自规则检出；②secret 不进模型请求（捕获网关断言 prompt 无原值、含掩码）；③NUL 字节 fail-closed；④非法 UTF-8 拒绝；⑤typecheck 仅经沙箱执行（fake 断言命令固定为 compile）；⑥沙箱不可用保持禁用；⑦无 docker 时 DockerSandboxRunner.available=False；⑧GITHUB_TOKEN 不出现在报告/日志/LLM 调用快照 |
+| 本机环境 | docker 不存在 → 沙箱自动禁用（日志告警），行为与验收一致：**隔离无法验证则保持禁用** |
+
+### 已知限制
+
+- Docker 沙箱逻辑经 FakeSandboxRunner 验证 + docker 命令拼装有单测；**未在真实 docker 环境实测**（本机无 docker）。
+- Secret 检测为正则模式集（AWS key/私钥/带引号与裸值 generic-secret），非 gitleaks 全量规则库；
+  高熵检测等留作后续增强。fail-closed 场景覆盖编码与控制字符，非穷尽。
+
+### 下一步
+
+- Phase 10：GitHub/GitLab 发布（行级评论、`--publish` 显式授权、幂等去重、SHA/位置校验）。
+
 ## Phase 8 — Finding 验证与置信度分级（2026-09-24 完成）
 
 ### 完成项

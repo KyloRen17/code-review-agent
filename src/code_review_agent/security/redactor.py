@@ -24,6 +24,21 @@ _OTHER_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+class SecurityError(Exception):
+    """输入无法被安全处理（fail-closed）：拒绝进入后续任何环节。"""
+
+
+def assert_safe_text(text: str) -> None:
+    """fail-closed 检查：含 NUL 或不可打印控制字符的输入直接拒绝。"""
+    if "\x00" in text:
+        raise SecurityError("输入包含 NUL 字节，无法安全处理，拒绝继续（fail-closed）")
+    bad_controls = {c for c in text if ord(c) < 32 and c not in "\t\n\r"}
+    if bad_controls:
+        raise SecurityError(
+            f"输入包含不可打印控制字符 {sorted(hex(ord(c)) for c in bad_controls)}，拒绝继续（fail-closed）"
+        )
+
+
 class RedactionReport(BaseModel):
     matches: int = 0
     by_kind: dict[str, int] = {}

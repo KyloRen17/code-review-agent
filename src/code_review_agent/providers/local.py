@@ -26,7 +26,12 @@ class LocalDiffProvider:
                 raise ProviderError(
                     "too_large", f"diff 大小 {size} 字节超过上限 {self.max_bytes} 字节，拒绝处理"
                 )
-            raw = path.read_text(encoding="utf-8", errors="replace")
+            try:
+                raw = path.read_text(encoding="utf-8")  # 严格解码：无法安全解码即拒绝
+            except UnicodeDecodeError as exc:
+                raise ProviderError(
+                    "invalid_input", f"diff 不是合法 UTF-8 文本（fail-closed）: {exc}"
+                ) from exc
         if size > self.max_bytes:
             raise ProviderError(
                 "too_large", f"diff 大小 {size} 字节超过上限 {self.max_bytes} 字节，拒绝处理"

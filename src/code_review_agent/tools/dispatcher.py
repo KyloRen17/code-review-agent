@@ -7,29 +7,36 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from .base import BaseReviewTool, ToolResult, ToolScope, ToolStatus
 from .registry import ToolRegistry, load_tools_config
+from .sandbox import SandboxRunner
 
 _EXECUTION_REFUSED = (
-    "执行型工具（requires_execution）必须在沙箱内运行；sandbox.enabled=false，已拒绝执行"
+    "执行型工具（requires_execution）必须在沙箱内运行；沙箱不可用或未启用，已拒绝执行"
 )
 
 
 class ToolDispatcher:
     """统一调度器：文件类型过滤、超时、失败隔离与受控重试。
 
-    决策全部由本类确定（不经过 LLM）。超时通过线程池实现：线程无法被强杀，
-    超时的调用会返回 timeout 状态但线程可能仍在后台结束——进程级强杀在 Phase 9 沙箱提供。
+    决策全部由本类确定（不经过 LLM）。执行型工具只有在沙箱可用时才可能运行；
+    沙箱不可用 → fail-closed 保持禁用，任何 diff/模型内容都无法改变该决策。
+    超时通过线程池实现：线程无法被强杀，超时的调用会返回 timeout 状态但线程
+    可能在后台结束——进程级强杀由沙箱（docker --stop-timeout）提供。
     """
 
     def __init__(
         self,
         registry: ToolRegistry,
         retries: int = 0,
-        sandbox_enabled: bool = False,
+        sandbox: SandboxRunner | None = None,
     ) -> None:
         self.registry = registry
         self.retries = retries
-        self.sandbox_enabled = sandbox_enabled
+        self.sandbox = sandbox
         self._executor: ThreadPoolExecutor | None = None
+
+    @property
+    def sandbox_enabled(self) -> bool:
+        return self.sandbox is not None and self.sandbox.available
 
     def enabled_names(self) -> list[str]:
         return self.registry.names()
@@ -56,7 +63,11 @@ class ToolDispatcher:
                 )
                 continue
             if tool.scope == ToolScope.task:
-                results.append(self._dispatch(tool, {"task_id": task_id, "diff_files": diff_files, "work_units": work_units}))
+                results.append(
+                    self._dispatch(
+                        tool, {"task_id": task_id, "diff_files": diff_files, "work_units": work_units, "sandbox": self.sandbox}
+                    )
+                )
                 continue
             for unit in work_units:
                 if not self._file_matches(tool, unit.file):
@@ -65,7 +76,14 @@ class ToolDispatcher:
                 results.append(
                     self._dispatch(
                         tool,
-                        {"task_id": task_id, "diff_files": diff_files, "work_units": work_units, "unit": unit, "diff_file": df},
+                        {
+                            "task_id": task_id,
+                            "diff_files": diff_files,
+                            "work_units": work_units,
+                            "unit": unit,
+                            "diff_file": df,
+                            "sandbox": self.sandbox,
+                        },
                     )
                 )
         return results
@@ -118,9 +136,9 @@ class ToolDispatcher:
         return any(fnmatch.fnmatch(file, pattern) for pattern in tool.file_types)
 
 
-def build_dispatcher(tools_yaml: Path | str | None = None) -> ToolDispatcher:
+def build_dispatcher(tools_yaml: Path | str | None = None, sandbox: SandboxRunner | None = None) -> ToolDispatcher:
     """按声明式配置装配：enabled 工具进注册表，timeout 可在 yaml 覆盖，
-    执行型工具受 sandbox 总开关约束。新增工具不需要改动任何调用方。"""
+    执行型工具受沙箱可用性约束（不可用即禁用）。新增工具不需要改动任何调用方。"""
     from . import implementations  # noqa: F401  触发工具自注册
     from .registry import _INSTALLED
 
@@ -137,5 +155,24 @@ def build_dispatcher(tools_yaml: Path | str | None = None) -> ToolDispatcher:
             tool.timeout_s = float(spec["timeout_s"])
         registry.register(tool)
     retries = int(data.get("dispatcher", {}).get("retries", 0))
-    sandbox_enabled = bool(data.get("sandbox", {}).get("enabled", False))
-    return ToolDispatcher(registry, retries=retries, sandbox_enabled=sandbox_enabled)
+    runner = sandbox
+    if runner is None and data.get("sandbox", {}).get("enabled", False):
+        runner = _build_default_sandbox(data.get("sandbox", {}))
+    return ToolDispatcher(registry, retries=retries, sandbox=runner)
+
+
+def _build_default_sandbox(sandbox_cfg: dict) -> SandboxRunner | None:
+    """sandbox.enabled=true 时尝试 Docker 沙箱；隔离无法验证则保持禁用。"""
+    import logging
+
+    from .sandbox import DockerSandboxRunner
+
+    image = str(sandbox_cfg.get("image", "python:3.11-slim"))
+    runner = DockerSandboxRunner(image=image)
+    if not runner.available:
+        logging.getLogger("cra.tools").warning(
+            "sandbox_unavailable",
+            extra={"reason": "docker 不可用；执行型工具保持禁用（fail-closed）"},
+        )
+        return None
+    return runner

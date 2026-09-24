@@ -13,7 +13,7 @@
 | 声明式工具注册 | **已实现**（Phase 4） | `tools/`、`configs/tools.yaml` |
 | Token/金额预算 | **已实现**（Phase 7） | `budget/`、`configs/model_pricing.yaml`、`--budget` |
 | 置信度分级 | **已实现**（Phase 8） | `review/validator.py`、`review/recheck.py` |
-| Secret 防护与安全执行 | 最小版（Phase 1）→ Phase 9（完整） | `security/` |
+| Secret 防护与安全执行 | **已实现**（Phase 9） | `security/`、`tools/sandbox.py` |
 
 当前进度见 `docs/progress.md`。
 
@@ -100,6 +100,18 @@ cra review examples/buggy.diff --budget 10.0    # 单任务预算上限（元，
 - 工具独立佐证（如 `py-ast-check` 检出的语法错误行）可支撑升级；
 - 高置信候选在预算内做**上限复核**（`confirmed` 保持 / `uncertain` 降级 / `rejected` 移除）；
 - 降级与复核理由写入报告、DB 与 trace（`cra trace <finding_id>`）。
+
+## 安全边界
+
+- **Secret 不出域**：diff 在进入模型/日志/trace 前脱敏；工具输出与模型回显入库前再脱敏；
+  Git 平台令牌只从环境变量读取，绝不写入配置、日志或报告（有对抗性测试验证）。
+- **fail-closed**：NUL/控制字符或非法 UTF-8 的输入直接拒绝处理；未登记单价的模型拒绝调用。
+- **无任意代码执行**：默认只有纯文本工具；执行型工具（typecheck）只能在受限 Docker 沙箱内
+  （无网络、非特权、只读、资源上限、不挂载宿主凭证）运行，命令固定、无 shell 拼接；
+  docker 不可用时自动保持禁用。
+- **Prompt Injection 防护**：diff/PR 描述/模型输出一律作为数据处理；工具选择、沙箱开关、
+  脱敏与预算决策全部由确定性代码执行，模型与 diff 内容无权改变（对抗测试覆盖）。
+- **默认不发布**：默认 dry-run，远程写入需要 Phase 10 的 `--publish` 显式授权。
 
 ## 接入真实 LLM（可选，已支持）
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -25,7 +26,7 @@ from ..review.finding import Confidence, Finding, Severity
 from ..review.recheck import RecheckService
 from ..review.report import render_markdown
 from ..review.validator import validate_and_grade
-from ..security.redactor import redact
+from ..security.redactor import assert_safe_text, redact
 from ..tools.base import ToolStatus
 from ..tools.dispatcher import ToolDispatcher
 from .state import GraphState
@@ -85,6 +86,7 @@ class ReviewPipeline:
         }
 
     def security_scan(self, state: GraphState) -> dict:
+        assert_safe_text(state["raw_diff"])  # fail-closed：无法安全处理的输入直接终止
         redacted, report = redact(state["raw_diff"])
         if report.matches:
             logger.warning(
@@ -120,14 +122,17 @@ class ReviewPipeline:
         span_id = current_span_id()
         with self.session_factory() as session:
             for r in results:
+                redacted_output, _ = redact(json.dumps(r.output, ensure_ascii=False)) if r.output else ("{}", None)
+                safe_output = json.loads(redacted_output)
+                redacted_error, _ = redact(r.error) if r.error else (None, None)
                 ops.save_tool_result(
                     session,
                     task_id=state["task_id"],
                     tool=r.tool,
                     work_unit_id=r.work_unit_id,
                     status=r.status.value,
-                    output=r.output,
-                    error=r.error,
+                    output=safe_output,
+                    error=redacted_error,
                     duration_ms=r.duration_ms,
                     attempts=r.attempts,
                     span_id=span_id,
@@ -242,6 +247,7 @@ class ReviewPipeline:
                 continue
             unit_findings: list[Finding] = []
             for lf in parsed.findings:
+                safe_evidence, _ = redact(lf.evidence)  # 模型可能回显敏感内容，入库前再脱敏
                 unit_findings.append(
                     Finding(
                         finding_id=_stable_finding_id(task_id, lf.file, lf.line, lf.title),
@@ -251,7 +257,7 @@ class ReviewPipeline:
                         title=lf.title,
                         description=lf.description,
                         trigger=lf.trigger,
-                        evidence=lf.evidence,
+                        evidence=safe_evidence,
                         suggestion=lf.suggestion,
                         severity=Severity(lf.severity),
                         confidence=Confidence(lf.confidence),

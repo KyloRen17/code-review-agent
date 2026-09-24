@@ -1,8 +1,8 @@
 # 声明式工具配置：新增工具 = 实现工具类（@install）+ 在此登记，主流程零改动。
 # enabled: false 的工具不会被调度。
 sandbox:
-  enabled: false   # 执行型工具总开关；true 也不会在宿主机执行（Phase 9 提供容器沙箱）
-  runner: none     # none | docker（Phase 9）
+  enabled: false   # 执行型工具总开关；true 时需 docker 可用，否则自动回退禁用（fail-closed）
+  image: python:3.11-slim
 dispatcher:
   retries: 1       # 工具失败后的重试次数（超时与主动 skipped 不重试）
 tools:
